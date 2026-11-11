@@ -8,7 +8,8 @@ What changes:
      Host/Origin checks and counts as a signed-in device with full access: Home Assistant's own login (admin
      only, see config.yaml) already decided who gets in.
   2. The page may be framed by its own origin (Home Assistant shows add-ons in a frame).
-  3. index.html loads its files by relative address, plus static/ha-ingress.js, which prefixes the
+  3. Request bodies that Ingress sends in chunks are collected before the panel reads them.
+  4. index.html loads its files by relative address, plus static/ha-ingress.js, which prefixes the
      panel's requests with the Ingress path.
 """
 import sys
@@ -36,6 +37,38 @@ def ha_ingress(handler) -> bool:
     return bool(HA_INGRESS_FROM) and str(handler.client_address[0]) == HA_INGRESS_FROM and bool(handler.headers.get("X-Ingress-Path"))
 
 
+def ha_unchunk(handler, limit=4 << 30):
+    """Home Assistant's Ingress proxy streams request bodies in chunks, without a Content-Length. The panel reads
+    bodies by Content-Length, so collect the chunks first (in memory up to 8 MB, then in a temporary file)."""
+    if "chunked" not in (handler.headers.get("Transfer-Encoding") or "").lower():
+        return
+    import tempfile
+    buf, total, rfile = tempfile.SpooledTemporaryFile(max_size=8 << 20), 0, handler.rfile
+    while True:
+        size = int(rfile.readline(1024).split(b";")[0].strip() or b"0", 16)
+        if size == 0:
+            while rfile.readline(8192) not in (b"\\r\\n", b"\\n", b""):
+                pass   # trailers
+            break
+        total += size
+        if total > limit:
+            raise BadRequest("Request body is too large")
+        left = size
+        while left:
+            part = rfile.read(min(1 << 20, left))
+            if not part:
+                raise BadRequest("The request body ended early")
+            buf.write(part)
+            left -= len(part)
+        rfile.readline(8)   # the line end after each chunk
+    buf.seek(0)
+    handler.rfile = buf
+    del handler.headers["Transfer-Encoding"]
+    del handler.headers["Content-Length"]
+    handler.headers["Content-Length"] = str(total)
+    handler.close_connection = True
+
+
 CSP = ("default-src 'self'; script-src 'self'; "''')
 
 edit(ui, '''       "frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
@@ -45,6 +78,8 @@ FILE_CSP''')
 edit(ui, '''            host = (self.headers.get("Host") or "").strip().lower()
             if not self.host_ok(host):''', '''            host = (self.headers.get("Host") or "").strip().lower()
             ingress = ha_ingress(self)
+            if ingress:
+                ha_unchunk(self)
             if not ingress and not self.host_ok(host):''')
 
 edit(ui, '''            if self.server_mode():  # server mode: every device signs in, with full or limited access''',

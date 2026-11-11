@@ -1,5 +1,5 @@
 name: Tiiny Control Panel
-version: "1.4.1-ha2"
+version: "1.4.1-ha3"
 slug: tiiny_panel
 description: Community web panel for a Tiiny AI device, shown inside Home Assistant
 url: https://github.com/0xStian/tiiny-control-panel

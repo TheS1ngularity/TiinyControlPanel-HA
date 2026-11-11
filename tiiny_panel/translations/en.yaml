@@ -4,6 +4,12 @@ configuration:
     description: >-
       On: any Home Assistant admin who opens the panel from the sidebar has full access, with no second sign-in.
       Off: every browser must sign in to the panel itself with a sign-in link, also inside Home Assistant.
+  gateway_any_address:
+    name: "Gateway: accept any numeric address"
+    description: >-
+      On: apps on other machines can use the gateway at http://<Home Assistant address>:8766. Off: the gateway
+      only answers its internal add-on address, as the original panel does, so only Home Assistant itself can use it.
+      Requests sent to a host name are refused either way.
   allow_commands:
     name: Let the agent run commands
     description: >-

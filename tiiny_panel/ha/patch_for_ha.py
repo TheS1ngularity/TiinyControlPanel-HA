@@ -9,7 +9,9 @@ What changes:
      only, see config.yaml) already decided who gets in.
   2. The page may be framed by its own origin (Home Assistant shows add-ons in a frame).
   3. Request bodies that Ingress sends in chunks are collected before the panel reads them.
-  4. index.html loads its files by relative address, plus static/ha-ingress.js, which prefixes the
+  4. Optional (add-on option): the gateway's network listener accepts requests addressed to any numeric
+     address, so apps on other machines can reach it through Home Assistant's address.
+  5. index.html loads its files by relative address, plus static/ha-ingress.js, which prefixes the
      panel's requests with the Ingress path.
 """
 import sys
@@ -89,6 +91,33 @@ edit(ui, '''            if self.server_mode():  # server mode: every device sign
 
 edit(ui, '''            if method != "GET" and origin and self.server.check_host and not self.host_ok(''',
      '''            if method != "GET" and origin and not ingress and self.server.check_host and not self.host_ok(''')
+
+gw = app / "tiinyui" / "gateway.py"
+
+edit(gw, '''MAX_BODY = 100 * 1024 ** 2''', '''def ha_numeric_host(server, host: str) -> bool:
+    """Add-on option "Gateway: accept any numeric address". An add-on has its own internal address, while apps on
+    other machines reach the gateway through Home Assistant's address, so the Host they send never matches the one
+    the gateway listens on. With the option on, the network listener also accepts a Host that is a plain IP address.
+    A website attacking through DNS rebinding has to send a name, so it is still refused."""
+    import os
+    if not getattr(server, "lan", False) or os.environ.get("TIINY_HA_GATEWAY_ANY_ADDRESS") != "1":
+        return False
+    host = (host or "").strip()
+    if host.startswith("["):
+        name = host[1:host.find("]")] if "]" in host else ""
+    else:
+        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return False
+
+
+MAX_BODY = 100 * 1024 ** 2''')
+
+edit(gw, '''            if host not in self.server.hosts:''',
+     '''            if host not in self.server.hosts and not ha_numeric_host(self.server, host):''')
 
 index = app / "static" / "index.html"
 text = index.read_text(encoding="utf-8")

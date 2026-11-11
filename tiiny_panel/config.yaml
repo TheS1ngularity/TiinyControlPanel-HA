@@ -1,5 +1,5 @@
 name: Tiiny Control Panel
-version: "1.4.1-ha3"
+version: "1.4.1-ha4"
 slug: tiiny_panel
 description: Community web panel for a Tiiny AI device, shown inside Home Assistant
 url: https://github.com/0xStian/tiiny-control-panel
@@ -21,17 +21,19 @@ ports:
   8766/tcp: 8766
 ports_description:
   8765/tcp: Panel opened directly (plain HTTP, needs its own sign-in). Leave off to use it only inside Home Assistant.
-  8766/tcp: Gateway for apps (Home Assistant, agents, scripts). Also switch on "Apps on other computers" in the panel.
+  8766/tcp: Gateway for apps on other machines. Also switch on "Apps on other computers" in the panel.
 environment:
   TIINY_UI_TLS: "off"
   TIINY_UI_PORT: "8765"
 options:
   trust_ha_login: true
+  gateway_any_address: true
   allow_commands: false
   public_names: []
   log_requests: false
 schema:
   trust_ha_login: bool
+  gateway_any_address: bool
   allow_commands: bool
   public_names:
     - str

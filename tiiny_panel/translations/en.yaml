@@ -1,0 +1,20 @@
+configuration:
+  trust_ha_login:
+    name: Trust the Home Assistant login
+    description: >-
+      On: any Home Assistant admin who opens the panel from the sidebar has full access, with no second sign-in.
+      Off: every browser must sign in to the panel itself with a sign-in link, also inside Home Assistant.
+  allow_commands:
+    name: Let the agent run commands
+    description: >-
+      The panel's agent may run commands and change files inside this add-on's container. It still asks before each one.
+  public_names:
+    name: Extra host names
+    description: >-
+      Names (not IP addresses) used to open the panel directly on port 8765, for example ha.local. Not needed for the sidebar.
+  log_requests:
+    name: Log every request
+    description: For troubleshooting. Writes each HTTP request to the add-on log.
+network:
+  8765/tcp: Panel opened directly (plain HTTP)
+  8766/tcp: Gateway for apps

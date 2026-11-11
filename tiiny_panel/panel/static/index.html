@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="tiiny-token" content="{{TOKEN}}">
+<title>Tiiny Control Panel</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<meta name="theme-color" content="#4f46e5">
+<link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#/dashboard" aria-label="Tiiny Control Panel home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><rect x="3" y="3" width="26" height="26" rx="8" fill="currentColor"/><path d="M11 12h10M16 12v10" stroke="var(--brand-ink)" stroke-width="3" stroke-linecap="round"/></svg>
+      </span>
+      <span class="brand-text"><strong>Tiiny</strong><small>Control Panel</small></span>
+    </a>
+    <nav class="nav" id="nav" aria-label="Main"></nav>
+    <div class="sidebar-foot">
+      <button class="pill" id="device-pill" type="button" title="Device status">
+        <span class="dot"></span><span class="pill-text">Checking…</span>
+      </button>
+    </div>
+  </aside>
+  <div class="nav-backdrop" id="nav-backdrop"></div>
+  <div class="main">
+    <header class="topbar">
+      <button class="btn ghost icon-only nav-toggle" id="nav-toggle" type="button" aria-label="Menu" aria-controls="sidebar" aria-expanded="false">
+        <span class="icon-slot" data-icon="menu"></span>
+      </button>
+      <div class="topbar-title">
+        <h1 id="view-title">Dashboard</h1>
+        <p id="view-sub" class="muted"></p>
+      </div>
+      <div class="topbar-actions">
+        <button class="pill mini" id="device-pill-mini" type="button" title="Device status"><span class="dot"></span><span class="pill-text"></span></button>
+        <button class="btn ghost" id="terms-btn" type="button" title="Terminal sessions" hidden>
+          <span class="icon-slot" data-icon="terminal"></span><span>Terminals</span><span class="count" id="terms-count">0</span>
+        </button>
+        <button class="btn ghost" id="activity-btn" type="button" title="Activity log: every command this page ran">
+          <span class="icon-slot" data-icon="list"></span><span>Activity</span><span class="count err" id="activity-count" hidden>0</span>
+        </button>
+        <button class="btn ghost icon-only" id="theme-btn" type="button" title="Theme"></button>
+      </div>
+    </header>
+    <main class="view" id="view" tabindex="-1"></main>
+  </div>
+</div>
+
+<aside class="drawer" id="activity" hidden aria-label="Activity log">
+  <header class="drawer-head">
+    <h2>Activity</h2>
+    <div class="row gap-sm">
+      <button class="btn sm ghost" id="activity-clear" type="button">Clear</button>
+      <button class="btn sm ghost icon-only" id="activity-close" type="button" title="Close"></button>
+    </div>
+  </header>
+  <p class="muted drawer-sub">Every <code>tiiny</code> command this page ran, newest first. Click one to see its output.</p>
+  <div class="drawer-body" id="activity-list"></div>
+</aside>
+
+<div id="drop-overlay" class="drop-overlay" hidden><div class="drop-card"><div class="drop-icon"></div><strong id="drop-title">Drop files</strong><span id="drop-sub" class="muted"></span></div></div>
+<div id="modal-root"></div>
+<div id="term-root"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script defer src="/static/vendor/xterm/xterm.js"></script>
+<script defer src="/static/vendor/xterm/addon-fit.js"></script>
+<script defer src="/static/app.js"></script>
+<script defer src="/static/js/store.js"></script>
+<script defer src="/static/js/agent.js"></script>
+<script defer src="/static/js/chat.js"></script>
+<script defer src="/static/js/projects.js"></script>
+<script defer src="/static/js/review.js"></script>
+<script defer src="/static/js/gallery.js"></script>
+<script defer src="/static/js/cutout.js"></script>
+<script defer src="/static/js/studio.js"></script>
+<script defer src="/static/js/meetings.js"></script>
+<script defer src="/static/js/voice.js"></script>
+<script defer src="/static/js/perf.js"></script>
+<script defer src="/static/vendor/qrcode/qrcode.js"></script>
+<script defer src="/static/js/pwa.js"></script>
+<script defer src="/static/js/devices.js"></script>
+<script defer src="/static/js/integrations.js"></script>
+<script defer src="/static/js/routines.js"></script>
+<script defer src="/static/js/boot.js"></script>
+</body>
+</html>

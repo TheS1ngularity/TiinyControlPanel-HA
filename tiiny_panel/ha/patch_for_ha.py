@@ -11,7 +11,8 @@ What changes:
   3. Request bodies that Ingress sends in chunks are collected before the panel reads them.
   4. Optional (add-on option): the gateway's network listener accepts requests addressed to any numeric
      address, so apps on other machines can reach it through Home Assistant's address.
-  5. index.html loads its files by relative address, plus static/ha-ingress.js, which prefixes the
+  5. Optional (add-on option): unlock the Tiiny automatically after it restarts, with the key the panel holds.
+  6. index.html loads its files by relative address, plus static/ha-ingress.js, which prefixes the
      panel's requests with the Ingress path.
 """
 import sys
@@ -91,6 +92,54 @@ edit(ui, '''            if self.server_mode():  # server mode: every device sign
 
 edit(ui, '''            if method != "GET" and origin and self.server.check_host and not self.host_ok(''',
      '''            if method != "GET" and origin and not ingress and self.server.check_host and not self.host_ok(''')
+
+edit(ui, '''CSP = ("default-src 'self'; script-src 'self'; "''',
+     '''def ha_auto_unlock_start():
+    """Add-on option "Unlock the Tiiny automatically". After a restart or power cut the Tiiny keeps its data locked
+    until someone logs in. With the option on, the panel checks once a minute and unlocks it with the key it already
+    holds from your last log in (the same request its Log in button sends). It never sends your password. After
+    three attempts that leave the device locked it stops trying until someone logs in by hand."""
+    if os.environ.get("TIINY_HA_AUTO_UNLOCK") != "1":
+        return
+    try:
+        every = max(5, int(os.environ.get("TIINY_HA_AUTO_UNLOCK_EVERY") or 60))
+    except ValueError:
+        every = 60
+
+    def loop():
+        failures = 0
+        time.sleep(min(30, every))
+        while True:
+            try:
+                info = DEVCONN.resolve()
+                key = info.get("key")
+                if info.get("address") and key:
+                    c = device.device_json(info, "auth", "POST", "/api/v1/connect", body={"auth_key": key}, timeout=15)
+                    state = str((c.get("json") or {}).get("data_state") or "") if isinstance(c.get("json"), dict) else ""
+                    if state == "locked" and failures < 3:
+                        print("Auto-unlock: your Tiiny is locked. Unlocking it with the saved key.", flush=True)
+                        if device.unlock_with_key(info, key) == "locked":
+                            failures += 1
+                            print(f"Auto-unlock: it is still locked (attempt {failures} of 3)."
+                                  + (" Giving up: log in from the panel's Account page." if failures >= 3 else ""), flush=True)
+                        else:
+                            failures = 0
+                            print("Auto-unlock: unlocked.", flush=True)
+                    elif state and state != "locked":
+                        failures = 0
+            except Exception as e:  # noqa: BLE001
+                print(f"Auto-unlock: {e}", flush=True)
+            time.sleep(every if failures == 0 else every * 15)
+
+    threading.Thread(target=loop, daemon=True, name="ha-auto-unlock").start()
+
+
+CSP = ("default-src 'self'; script-src 'self'; "''')
+
+edit(ui, '''    DEVCONN = DeviceConn(SETTINGS)
+''', '''    DEVCONN = DeviceConn(SETTINGS)
+    ha_auto_unlock_start()
+''')
 
 gw = app / "tiinyui" / "gateway.py"
 

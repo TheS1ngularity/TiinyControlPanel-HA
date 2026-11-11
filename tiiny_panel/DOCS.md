@@ -27,6 +27,7 @@ A local add-on that runs the community Tiiny Control Panel (1.4.1) and shows it 
 |---|---|---|
 | Trust the Home Assistant login | on | See above. |
 | Gateway: accept any numeric address | on | Lets apps on other machines use the gateway at `http://<HA address>:8766`. Off restores the original panel's check, which inside an add-on only Home Assistant itself can pass. |
+| Unlock the Tiiny automatically | off | After the Tiiny restarts, unlocks it with the key saved at your last log in. Checks once a minute; stops after three failed attempts. |
 | Let the agent run commands | off | The agent may run commands inside the add-on's container, after your OK each time. |
 | Extra host names | none | Names used to open the panel directly on port 8765. |
 | Log every request | off | Troubleshooting. |

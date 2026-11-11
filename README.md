@@ -45,6 +45,7 @@ remote access work.
 |---|---|---|
 | Trust the Home Assistant login | on | See above. |
 | Gateway: accept any numeric address | on | Lets apps on other machines use the panel's gateway at `http://<HA address>:8766`. |
+| Unlock the Tiiny automatically | off | After the Tiiny restarts, unlocks it with the key saved at your last log in. Checks once a minute; stops after three failed attempts. |
 | Let the agent run commands | off | The panel's agent may run commands inside the add-on's container, after your OK each time. |
 | Extra host names | none | Names used to open the panel directly on port 8765. |
 | Log every request | off | Troubleshooting. |
@@ -67,11 +68,11 @@ image is built (`tiiny_panel/ha/patch_for_ha.py`). Each edit must match exactly,
 - **"Find my Tiiny" doesn't find it.** The add-on isn't on the host network. Type the address.
 - **No USB-C connection** to the Tiiny from the Home Assistant machine.
 - **After every restart or power cut the Tiiny locks itself** until someone logs in. That is the device's design.
-  The panel's Log in button does it.
+  The panel's Log in button does it, or switch on **Unlock the Tiiny automatically** to have the add-on do it.
 - **No "install as an app"** when opened inside Home Assistant.
 - **Microphone features** (dictation, live meeting notes) are untested inside Home Assistant's frame and may not work.
-- **Panel updates are manual.** The add-on's version says which panel it contains (`1.4.1-ha4` is panel 1.4.1,
-  add-on revision 4). A new panel release needs a new add-on release; the panel's own updater is not used.
+- **Panel updates are manual.** The add-on's version says which panel it contains (`1.4.1-ha5` is panel 1.4.1,
+  add-on revision 5). A new panel release needs a new add-on release; the panel's own updater is not used.
 
 ## Your data
 

@@ -13,6 +13,7 @@ except (OSError, ValueError):
 # Empty address = never trust the Ingress proxy: every browser signs in to the panel itself.
 os.environ["TIINY_HA_INGRESS_FROM"] = "172.30.32.2" if opts.get("trust_ha_login", True) else ""
 os.environ["TIINY_HA_GATEWAY_ANY_ADDRESS"] = "1" if opts.get("gateway_any_address", True) else "0"
+os.environ["TIINY_HA_AUTO_UNLOCK"] = "1" if opts.get("auto_unlock", False) else "0"
 args = ["/app/bin/tiiny-panel"]
 if opts.get("allow_commands"):
     args.append("--allow-commands")
@@ -22,7 +23,8 @@ for name in opts.get("public_names") or []:
     if isinstance(name, str) and name.strip():
         args += ["--public-name", name.strip()]
 print("Starting:", " ".join(args), "| trust Home Assistant login:", bool(os.environ["TIINY_HA_INGRESS_FROM"]),
-      "| gateway accepts any numeric address:", os.environ["TIINY_HA_GATEWAY_ANY_ADDRESS"] == "1", flush=True)
+      "| gateway accepts any numeric address:", os.environ["TIINY_HA_GATEWAY_ANY_ADDRESS"] == "1",
+      "| auto-unlock:", os.environ["TIINY_HA_AUTO_UNLOCK"] == "1", flush=True)
 if os.environ.get("HA_START_DRY_RUN"):
     sys.exit(0)
 os.execv(args[0], args)

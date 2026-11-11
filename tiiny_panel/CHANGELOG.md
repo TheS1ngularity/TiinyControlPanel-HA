@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.1-ha5
+- New option "Unlock the Tiiny automatically" (off by default): unlocks the device after a restart or power cut with the key saved at your last log in.
+
 ## 1.4.1-ha4
 - Fix: apps on other machines were refused by the gateway on port 8766 ("Forbidden host"). New option "Gateway: accept any numeric address", on by default.
 

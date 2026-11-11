@@ -1,0 +1,116 @@
+name: New panel release
+
+# Once a day: is there a newer release of the upstream Tiiny Control Panel than the copy in tiiny_panel/panel/?
+# If so, copy it in, test the Home Assistant edits against it, and open a pull request. Nothing is published
+# until a person merges that pull request. If the edits no longer fit, the pull request is opened as a draft
+# with the test output, so someone can adjust tiiny_panel/ha/patch_for_ha.py.
+#
+# Needs: Settings → Actions → General → Workflow permissions → "Allow GitHub Actions to create and approve pull requests".
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM: 0xStian/tiiny-control-panel
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare versions
+        id: v
+        run: |
+          tag="$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)"
+          if ! printf '%s' "$tag" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Upstream's latest release is '$tag', not a plain version. Nothing to do."
+            echo "update=no" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          latest="${tag#v}"
+          current="$(sed -n 's/^VERSION = "\(.*\)"/\1/p' tiiny_panel/panel/tiinyui/__init__.py)"
+          newest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)"
+          branch="panel-$latest"
+          echo "This repository ships panel $current. Upstream's latest release is $latest."
+          if [ "$latest" = "$current" ] || [ "$newest" != "$latest" ]; then
+            echo "update=no" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "Branch $branch already exists: a pull request for it was opened earlier."
+            echo "update=no" >> "$GITHUB_OUTPUT"
+          else
+            { echo "update=yes"; echo "tag=$tag"; echo "latest=$latest"; echo "current=$current"; echo "branch=$branch"; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Copy the new release in
+        if: steps.v.outputs.update == 'yes'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          LATEST: ${{ steps.v.outputs.latest }}
+        run: |
+          git clone --quiet --depth 1 --branch "$TAG" "https://github.com/$UPSTREAM" "$RUNNER_TEMP/upstream"
+          python3 tools/update_panel.py --source "$RUNNER_TEMP/upstream" --version "$LATEST"
+
+      - uses: actions/setup-python@v5
+        if: steps.v.outputs.update == 'yes'
+        with:
+          python-version: "3.12"
+
+      - name: Test the Home Assistant edits against it
+        if: steps.v.outputs.update == 'yes'
+        id: test
+        continue-on-error: true
+        run: |
+          pip install "playwright>=1.45"
+          playwright install --with-deps chromium
+          set -o pipefail
+          python tests/smoke.py --browser 2>&1 | tee "$RUNNER_TEMP/test.log"
+          docker build -t tiiny-panel-ha tiiny_panel 2>&1 | tail -20 | tee -a "$RUNNER_TEMP/test.log"
+
+      - name: Open a pull request
+        if: steps.v.outputs.update == 'yes'
+        env:
+          LATEST: ${{ steps.v.outputs.latest }}
+          CURRENT: ${{ steps.v.outputs.current }}
+          BRANCH: ${{ steps.v.outputs.branch }}
+          RESULT: ${{ steps.test.outcome }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -q -m "Tiiny Control Panel $LATEST"
+          git push -q origin "$BRANCH"
+          {
+            echo "Upstream released Tiiny Control Panel **$LATEST** (this repository ships $CURRENT)."
+            echo "Release notes: https://github.com/$UPSTREAM/releases/tag/v$LATEST"
+            echo
+            if [ "$RESULT" = "success" ]; then
+              echo "**Automated checks passed**: the Home Assistant edits still apply, every page loads behind a stand-in for Home Assistant, and the image builds."
+            else
+              echo "**Automated checks FAILED.** The Home Assistant edits probably no longer fit this release. Adjust \`tiiny_panel/ha/patch_for_ha.py\` on this branch before merging."
+            fi
+            echo
+            echo "Before merging:"
+            echo "- [ ] Read the diff of \`tiiny_ui.py\` around sign-in and of \`tiinyui/gateway.py\`: a passing check shows the edits still match the text, not that the result is still safe."
+            echo "- [ ] If \`panel/Dockerfile.upstream\` changed, make the same change in \`tiiny_panel/Dockerfile\`."
+            echo "- [ ] Install this branch on a real Home Assistant if the release touches sign-in, the gateway or the device login."
+            echo
+            echo "Merging publishes add-on version \`$LATEST-ha1\` to everyone who installed this repository."
+            echo
+            echo "<details><summary>Test output</summary>"
+            echo
+            echo '```'
+            tail -60 "$RUNNER_TEMP/test.log" 2>/dev/null || echo "(no output)"
+            echo '```'
+            echo "</details>"
+          } > "$RUNNER_TEMP/body.md"
+          draft=""
+          [ "$RESULT" = "success" ] || draft="--draft"
+          gh pr create $draft --base main --head "$BRANCH" --title "Tiiny Control Panel $LATEST" --body-file "$RUNNER_TEMP/body.md"

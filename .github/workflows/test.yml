@@ -1,0 +1,29 @@
+name: Test
+
+# Checks the Home Assistant edits against the panel copy in this repository, and that the add-on image builds.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the test browser
+        run: |
+          pip install "playwright>=1.45"
+          playwright install --with-deps chromium
+      - name: Patch the panel and check it behind a stand-in for Home Assistant
+        run: python tests/smoke.py --browser
+      - name: Build the add-on image
+        run: docker build -t tiiny-panel-ha tiiny_panel

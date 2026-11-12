@@ -11,9 +11,10 @@ A local add-on that runs the community Tiiny Control Panel (1.4.1) and shows it 
 ## How access works
 
 - **Inside Home Assistant (sidebar, also remotely):** with **Trust the Home Assistant login** on (the default) there
-  is no separate sign-in. Any Home Assistant **admin** gets full access to the panel, including its terminal, so use
-  two-factor authentication in Home Assistant. Non-admin users don't see it. Switch the option off and every browser
-  signs in to the panel itself.
+  is no separate sign-in. Anyone who reaches the panel through Home Assistant gets full access, including its
+  terminal, so use two-factor authentication in Home Assistant. Only administrators see it in the sidebar, but
+  treat every Home Assistant login as able to open it. Switch the option off and every browser signs in to the
+  panel itself.
 - **Directly on port 8765:** off by default. If you map the port (Configuration → Network), it is plain HTTP and
   each browser signs in with a link from System → Devices → Add a device.
 - **Gateway on port 8766 (optional):** gives each app its own limited key and loads models on demand. In the panel:

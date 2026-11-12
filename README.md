@@ -30,13 +30,16 @@ Or by hand:
 
 ## Read this before installing: who gets access
 
-By default, **any Home Assistant administrator who opens the panel from the sidebar has full access to it**, with
+By default, **anyone who reaches the panel through Home Assistant has full access to it**, with
 no second sign-in. That includes the panel's terminal and everything it can do to your Tiiny. The original panel
 makes every browser sign in separately; this add-on trusts Home Assistant's login instead, so that the sidebar and
 remote access work.
 
 - Use two-factor authentication in Home Assistant, especially if it is reachable from the internet.
-- Non-admin users don't see the panel.
+- The sidebar entry is shown to administrators only. That hides the panel from other users; it may not stop one
+  who opens its address directly, so don't rely on it as protection.
+- If people you wouldn't hand a terminal to have a login on your Home Assistant (guests, children), switch off
+  **Trust the Home Assistant login**.
 - To get the original behaviour back, switch off **Trust the Home Assistant login** in the add-on's Configuration.
 
 ## Options

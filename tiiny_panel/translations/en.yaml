@@ -2,7 +2,8 @@ configuration:
   trust_ha_login:
     name: Trust the Home Assistant login
     description: >-
-      On: any Home Assistant admin who opens the panel from the sidebar has full access, with no second sign-in.
+      On: anyone who opens the panel through Home Assistant has full access, with no second sign-in. It is listed
+      in the sidebar for administrators only, which hides it but may not block other users.
       Off: every browser must sign in to the panel itself with a sign-in link, also inside Home Assistant.
   gateway_any_address:
     name: "Gateway: accept any numeric address"

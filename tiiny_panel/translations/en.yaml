@@ -15,8 +15,14 @@ configuration:
     name: Unlock the Tiiny automatically
     description: >-
       After a restart or power cut the Tiiny keeps its data locked until someone logs in. On: the add-on checks once a
-      minute and unlocks it with the key saved at your last log in. Your password is never stored. Anyone who can
-      power the Tiiny on inside your network then gets an unlocked device, so leave this off if that matters to you.
+      minute and unlocks it with the key saved at your last log in from the panel. Anyone who can power the Tiiny on
+      inside your network then gets an unlocked device, so leave this off if that matters to you.
+  unlock_password:
+    name: Tiiny password (optional)
+    description: >-
+      Only used when automatic unlock is on and the Tiiny refuses the saved key: the add-on then logs in with this
+      password once and saves the new key. Leave empty to log in by hand in that case. The password is stored
+      unencrypted in Home Assistant and in its backups.
   allow_commands:
     name: Let the agent run commands
     description: >-

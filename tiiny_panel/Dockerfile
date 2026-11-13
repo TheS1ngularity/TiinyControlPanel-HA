@@ -20,13 +20,14 @@ COPY panel/tiiny_ui.py ./
 COPY panel/tiinyui/ ./tiinyui/
 COPY panel/static/ ./static/
 COPY panel/docker/entrypoint.sh /app/bin/tiiny-panel
-COPY ha/ha-ingress.js ./static/ha-ingress.js
+COPY ha/ha-ingress.js ha/ha-autoload.js ./static/
+COPY ha/ha_watch.py ./tiinyui/ha_watch.py
 COPY ha/patch_for_ha.py /tmp/patch_for_ha.py
 COPY ha/start.py /app/bin/ha-start.py
 RUN sed -i 's/\r$//' /app/bin/tiiny-panel \
  && chmod 0755 /app/bin/tiiny-panel \
  && python3 /tmp/patch_for_ha.py /app \
- && python3 -m py_compile /app/tiiny_ui.py \
+ && python3 -m py_compile /app/tiiny_ui.py /app/tiinyui/ha_watch.py \
  && rm /tmp/patch_for_ha.py
 
 HEALTHCHECK --interval=30s --timeout=6s --start-period=90s CMD ["/app/bin/tiiny-panel", "health"]

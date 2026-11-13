@@ -48,12 +48,39 @@ remote access work.
 |---|---|---|
 | Trust the Home Assistant login | on | See above. |
 | Gateway: accept any numeric address | on | Lets apps on other machines use the panel's gateway at `http://<HA address>:8766`. |
-| Unlock the Tiiny automatically | off | After the Tiiny restarts, unlocks it with the key saved at your last log in. Checks once a minute; stops after three failed attempts. |
+| Unlock the Tiiny automatically | off | After the Tiiny restarts, unlocks it with the key saved at your last log in. See below. |
+| Tiiny password | empty | Optional fallback for automatic unlock when the saved key is refused. See below. |
 | Let the agent run commands | off | The panel's agent may run commands inside the add-on's container, after your OK each time. |
 | Extra host names | none | Names used to open the panel directly on port 8765. |
 | Log every request | off | Troubleshooting. |
 
 Details, ports and how apps connect: [tiiny_panel/DOCS.md](tiiny_panel/DOCS.md).
+
+## After a restart: unlock and load models automatically
+
+A Tiiny locks its data every time it restarts, and its models are unloaded. Until someone logs in, nothing works.
+The add-on can do both steps for you.
+
+**How unlocking works.** There is one way to unlock: with a key. Your password is only how you get a key.
+
+1. You log in once in the panel (Account → Log in). The Tiiny hands out a key and the panel saves it.
+2. With **Unlock the Tiiny automatically** on, the add-on checks once a minute. If the Tiiny is locked, it sends the saved key.
+3. If the Tiiny refuses the key and you filled in **Tiiny password**, the add-on logs in with it once, saves the new
+   key and unlocks. Without a password you log in by hand, once, and automatic unlock works again.
+
+The saved key survives restarts of the Tiiny, the add-on and Home Assistant. It may stop working after a password
+change or a TiinyOS update. The add-on tries the key three times and the password once per lock, then stops and
+writes the Tiiny's answer to the add-on log.
+
+**How loading models works.** In the panel, press **Auto-load** (top bar) and tick the models you want. They are
+loaded top to bottom whenever the Tiiny is unlocked again after being locked or unreachable, whether the add-on or
+you unlocked it. "Save and load now" tries it straight away. Pick only what fits in the Tiiny's memory together.
+
+**What to weigh up.**
+
+- With automatic unlock on, anyone who can power the Tiiny on inside your network gets an unlocked device.
+- The password is optional. It is stored unencrypted in the add-on's options and in Home Assistant backups, and
+  every Home Assistant administrator can read it. Leave it empty if the saved key is enough for you.
 
 ## What is different from the original panel
 
@@ -64,6 +91,7 @@ image is built (`tiiny_panel/ha/patch_for_ha.py`). Each edit must match exactly,
 - The page may be shown inside Home Assistant's frame, and its requests get the sidebar's path prefix.
 - Request bodies that Home Assistant sends in chunks are read correctly.
 - The gateway can accept requests addressed to Home Assistant's address (optional).
+- Automatic unlock and the **Auto-load** button are additions of this add-on (`tiiny_panel/ha/ha_watch.py`, `ha-autoload.js`).
 - HTTPS on the direct port is off; inside Home Assistant the connection is as secure as your Home Assistant address.
 
 ## Known limits
@@ -71,15 +99,15 @@ image is built (`tiiny_panel/ha/patch_for_ha.py`). Each edit must match exactly,
 - **"Find my Tiiny" doesn't find it.** The add-on isn't on the host network. Type the address.
 - **No USB-C connection** to the Tiiny from the Home Assistant machine.
 - **After every restart or power cut the Tiiny locks itself** until someone logs in. That is the device's design.
-  The panel's Log in button does it, or switch on **Unlock the Tiiny automatically** to have the add-on do it.
+  The panel's Log in button does it, or let the add-on do it (see above).
 - **No "install as an app"** when opened inside Home Assistant.
 - **Microphone features** (dictation, live meeting notes) are untested inside Home Assistant's frame and may not work.
-- **Panel updates are manual.** The add-on's version says which panel it contains (`1.4.1-ha5` is panel 1.4.1,
-  add-on revision 5). A new panel release needs a new add-on release; the panel's own updater is not used.
+- **Panel updates are manual.** The add-on's version says which panel it contains (`1.4.1-ha6` is panel 1.4.1,
+  add-on revision 6). A new panel release needs a new add-on release; the panel's own updater is not used.
 
 ## Your data
 
-Chats, settings, and the key the panel uses for your Tiiny are stored in the add-on's data folder and are included
+Chats, settings, the key the panel uses for your Tiiny, and the optional password are stored in the add-on's data folder and are included
 in Home Assistant backups. Nothing is sent anywhere except to your Tiiny, and to Tiiny's servers when the add-on
 installs Tiiny's command-line tool on first start.
 

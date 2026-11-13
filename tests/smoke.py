@@ -30,7 +30,9 @@ ROOT = Path(__file__).resolve().parent.parent
 ADDON = ROOT / "tiiny_panel"
 PREFIX = "/api/hassio_ingress/TESTTOKEN"
 P_PANEL, P_GATEWAY, P_PROXY, P_DEVICE = 18765, 18766, 18000, 18080
-DEVICE = {"state": "locked", "unlocks": 0, "good_key": 0}
+DEVICE = {"state": "locked", "unlocks": 0, "good_key": 0, "logins": 0, "running": [], "starts": []}
+MODELS = [{"id": "acme/chat-model", "name": "Chat model", "type": "Text Generation", "npu_usage": 9.5},
+          {"id": "acme/embed-model", "name": "Embed model", "type": "Embedding", "npu_usage": 1.2}]
 OUTSIDE = []          # requests the page made outside the Ingress prefix
 FAILS = []
 
@@ -54,6 +56,12 @@ class FakeTiiny(BaseHTTPRequestHandler):
         self.wfile.write(out)
 
     def do_GET(self):
+        if self.path.startswith("/api/v1/models/") and self.path.endswith("/get_progress"):
+            return self.reply({"status": "loaded", "progress": 100})
+        if self.path.split("?")[0] == "/api/v1/models/":
+            return self.reply({"data": MODELS})
+        if self.path.split("?")[0] == "/v1/models":
+            return self.reply({"data": [{"id": i} for i in DEVICE["running"]]})
         self.reply({})
 
     def do_POST(self):
@@ -67,7 +75,20 @@ class FakeTiiny(BaseHTTPRequestHandler):
             if body.get("auth_key") == "test-key":
                 DEVICE["good_key"] += 1
                 DEVICE["state"] = "unlocked"
-        self.reply({"data_state": DEVICE["state"]})
+        elif self.path == "/api/v1/account/auth":
+            DEVICE["logins"] += 1
+            if body.get("password") == "right-password":
+                return self.reply({"auth_key": "test-key", "user_info": {"user_name": "tester"}})
+            self.send_response(401)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            return self.wfile.write(b"{}")
+        elif self.path.startswith("/api/v1/models/") and self.path.endswith("/start"):
+            mid = self.path[len("/api/v1/models/"):-len("/start")]
+            DEVICE["starts"].append(mid)
+            DEVICE["running"].append(mid)
+            return self.reply({"status": "ok"})
+        self.reply({"data_state": DEVICE["state"], "status": "not_auth" if DEVICE["state"] == "locked" else "ok"})
 
 
 class FakeIngress(BaseHTTPRequestHandler):
@@ -141,20 +162,30 @@ def build(panel_src: Path, work: Path) -> Path:
     shutil.copytree(panel_src / "tiinyui", app / "tiinyui")
     shutil.copytree(panel_src / "static", app / "static")
     shutil.copy(ADDON / "ha" / "ha-ingress.js", app / "static" / "ha-ingress.js")
+    shutil.copy(ADDON / "ha" / "ha-autoload.js", app / "static" / "ha-autoload.js")
+    shutil.copy(ADDON / "ha" / "ha_watch.py", app / "tiinyui" / "ha_watch.py")
     subprocess.run([sys.executable, str(ADDON / "ha" / "patch_for_ha.py"), str(app)], check=True)
-    subprocess.run([sys.executable, "-m", "py_compile", str(app / "tiiny_ui.py"), str(app / "tiinyui" / "gateway.py")], check=True)
+    subprocess.run([sys.executable, "-m", "py_compile", str(app / "tiiny_ui.py"), str(app / "tiinyui" / "gateway.py"),
+                    str(app / "tiinyui" / "ha_watch.py")], check=True)
     return app
 
 
-def start_panel(app: Path, work: Path, any_address: str):
-    home = work / f"home-{any_address}"
+def start_panel(app: Path, work: Path, any_address: str, name: str = "", key: str = "test-key", password: str = "", autoload=()):
+    name = name or any_address
+    DEVICE.update(state="locked", unlocks=0, good_key=0, logins=0, running=[], starts=[])
+    home = work / f"home-{name}"
     cfg = home / "config" / "tiiny-ui"
     cfg.mkdir(parents=True)
-    (cfg / "settings.json").write_text(json.dumps({"device_address": "127.0.0.1", "device_port": str(P_DEVICE), "api_key": "test-key"}))
+    (cfg / "settings.json").write_text(json.dumps({"device_address": "127.0.0.1", "device_port": str(P_DEVICE), "api_key": key}))
+    (home / "options.json").write_text(json.dumps({"auto_unlock": True, "unlock_password": password}))
+    if autoload:
+        (home / "share" / "tiiny-ui").mkdir(parents=True)
+        (home / "share" / "tiiny-ui" / "ha-autoload.json").write_text(json.dumps({"selected": list(autoload)}))
     env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / "config"), XDG_DATA_HOME=str(home / "share"),
                TIINY_UI_TLS="off", TIINY_HA_INGRESS_FROM="127.0.0.1", TIINY_HA_GATEWAY_ANY_ADDRESS=any_address,
-               TIINY_HA_AUTO_UNLOCK="1", TIINY_HA_AUTO_UNLOCK_EVERY="5")
-    log = open(work / f"panel-{any_address}.log", "w")
+               TIINY_HA_AUTO_UNLOCK="1", TIINY_HA_AUTO_UNLOCK_EVERY="5", TIINY_HA_AUTOLOAD_RETRY="1",
+               HA_OPTIONS_FILE=str(home / "options.json"))
+    log = open(work / f"panel-{name}.log", "w")
     proc = subprocess.Popen([sys.executable, str(app / "tiiny_ui.py"), "--server", "--no-browser", "--port", str(P_PANEL),
                              "--gateway-port", str(P_GATEWAY)], env=env, stdout=log, stderr=subprocess.STDOUT)
     for _ in range(60):
@@ -165,6 +196,13 @@ def start_panel(app: Path, work: Path, any_address: str):
             time.sleep(0.5)
     proc.kill()
     sys.exit("The panel didn't start. See " + log.name)
+
+
+def wait_for(test, seconds=25):
+    end = time.time() + seconds
+    while time.time() < end and not test():
+        time.sleep(0.3)
+    return bool(test())
 
 
 def gateway_status(base, token, host):
@@ -198,6 +236,12 @@ def browser_pass():
                 frame.evaluate("h => { location.hash = h; }", r)
                 page.wait_for_timeout(600)
             page.wait_for_timeout(1000)
+            frame.click("#ha-autoload-btn")
+            page.wait_for_timeout(1500)
+            boxes = frame.eval_on_selector_all("#ha-autoload input[type=checkbox]", "els => els.map(e => e.checked)")
+            check(len(boxes) == 2 and any(boxes), f"the Auto-load picker lists the models with the saved choice ticked ({boxes})")
+            if os.environ.get("SMOKE_SHOT"):
+                page.screenshot(path=os.environ["SMOKE_SHOT"])
         b.close()
     check(not OUTSIDE, "no request left the Ingress prefix", "; ".join(sorted(set(OUTSIDE))[:6]))
     check(not bad, "no page request was refused or missing (401/403/404)", "; ".join(sorted(set(bad))[:6]))
@@ -216,7 +260,7 @@ def main():
     base = f"http://127.0.0.1:{P_PROXY}{PREFIX}"
 
     print("Run 1: all add-on options on", flush=True)
-    proc = start_panel(app, work, "1")
+    proc = start_panel(app, work, "1", autoload=["acme/chat-model"])
     try:
         code, html = call("GET", base + "/")
         check(code == 200 and "static/ha-ingress.js" in html, "through Ingress the page opens without a sign-in", f"HTTP {code}")
@@ -240,6 +284,18 @@ def main():
               f"unlock calls {DEVICE['unlocks']}")
         time.sleep(7)
         check(DEVICE["unlocks"] == 1, "an unlocked Tiiny is left alone", f"unlock calls {DEVICE['unlocks']}")
+        check(wait_for(lambda: DEVICE["starts"] == ["acme/chat-model"]), "after the unlock the chosen model is loaded",
+              f"starts {DEVICE['starts']}")
+        code, text = call("GET", base + "/api/ha/autoload", headers={"X-Tiiny-Token": token})
+        got = json.loads(text) if code == 200 else {}
+        check(got.get("selected") == ["acme/chat-model"] and len(got.get("models") or []) == 2 and got.get("auto_unlock") is True,
+              "the picker gets the model list and the saved choice", f"HTTP {code} {text[:200]}")
+        code, text = call("POST", base + "/api/ha/autoload", {"selected": ["acme/chat-model", "acme/embed-model"], "load_now": True},
+                          {"X-Tiiny-Token": token})
+        check(code == 200 and wait_for(lambda: DEVICE["starts"] == ["acme/chat-model", "acme/embed-model"]),
+              '"Save and load now" loads what is missing, and nothing twice', f"HTTP {code} starts {DEVICE['starts']}")
+        check(call("POST", base + "/api/ha/autoload", {"selected": "x"}, {"X-Tiiny-Token": token})[0] == 400, "a malformed choice is refused")
+        check('static/ha-autoload.js' in html, "the page loads the picker")
         if args.browser:
             browser_pass()
     finally:
@@ -255,6 +311,34 @@ def main():
         check(got == 403, "gateway, request addressed to another numeric address: refused, as upstream", f"got {got} {info}")
         got, info = gateway_status(base, token, "")
         check(got == 401, "gateway, request addressed to its own address: let in", f"got {got} {info}")
+    finally:
+        proc.terminate()
+        proc.wait(timeout=20)
+
+    print("Run 3: the saved key is refused, the password option is filled in", flush=True)
+    proc = start_panel(app, work, "1", name="password", key="stale-key", password="right-password", autoload=["acme/embed-model"])
+    try:
+        check(wait_for(lambda: DEVICE["state"] == "unlocked"), "a refused key falls back to the password and unlocks",
+              f"logins {DEVICE['logins']} unlock calls {DEVICE['unlocks']}")
+        check(DEVICE["logins"] == 1 and DEVICE["good_key"] == 1, "one log in, then the new key is used", f"logins {DEVICE['logins']}")
+        check(wait_for(lambda: DEVICE["starts"] == ["acme/embed-model"]), "the chosen model is loaded after a password unlock")
+        cli = list((work / "home-password").rglob("config.json"))
+        check(any('"test-key"' in f.read_text() for f in cli), "the new key is saved for next time")
+    finally:
+        proc.terminate()
+        proc.wait(timeout=20)
+    logtext = (work / "panel-password.log").read_text()
+    check("right-password" not in logtext and "stale-key" not in logtext and "test-key" not in logtext, "neither password nor keys are in the log")
+    check("The Tiiny answered: HTTP 200, status=not_auth" in logtext, "the log says what the Tiiny answered when it refused")
+
+    print("Run 4: the saved key and the password are both refused", flush=True)
+    proc = start_panel(app, work, "1", name="wrong", key="stale-key", password="wrong-password")
+    try:
+        wait_for(lambda: DEVICE["logins"] >= 1)
+        time.sleep(12)
+        check(DEVICE["logins"] == 1 and DEVICE["state"] == "locked", "a refused password is tried once, not again",
+              f"logins {DEVICE['logins']}")
+        check(DEVICE["unlocks"] == 1, "the refused key is not sent again straight away", f"unlock calls {DEVICE['unlocks']}")
     finally:
         proc.terminate()
         proc.wait(timeout=20)

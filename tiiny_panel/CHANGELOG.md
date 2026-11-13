@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.1-ha6
+- New: **Auto-load** button in the panel's top bar. Tick models there and they are loaded automatically after the Tiiny is unlocked again.
+- New option "Tiiny password" (empty by default): fallback for automatic unlock when the Tiiny refuses the saved key.
+- Automatic unlock now writes the Tiiny's answer to the log when it refuses, and keeps watching after it gives up, so a log in by hand is noticed.
+
 ## 1.4.1-ha5
 - New option "Unlock the Tiiny automatically" (off by default): unlocks the device after a restart or power cut with the key saved at your last log in.
 

@@ -3,8 +3,8 @@ logging in by hand.
 
 One background check, once a minute:
   1. Unlock (add-on option "Unlock the Tiiny automatically"). After a restart the Tiiny keeps its data locked. The
-     check sends the key saved at your last log in. If the Tiiny refuses that key and the add-on option "Tiiny
-     password" is filled in, it logs in with the password once, saves the new key and unlocks with it.
+     check sends the key saved at your last log in. If there is no saved key, or the Tiiny refuses it, and the add-on
+     option "Tiiny password" is filled in, it logs in with the password once, saves the new key and unlocks with it.
   2. Load models (chosen in the panel, button "Auto-load"). Once the Tiiny is unlocked again after having been
      locked or unreachable, the chosen models are loaded one after the other.
 
@@ -90,7 +90,7 @@ def unlock(info: dict, key: str):
     return data_state(info, key), said(r)
 
 
-def password_unlock(devconn, settings, pw: str):
+def password_login(devconn, settings, pw: str) -> str:
     """Log in with the password like the panel's Log in button: the Tiiny answers with a new key, which is saved
     where the panel and Tiiny's tool both read it. Raises BadRequest when the Tiiny refuses the password."""
     info = devconn.resolve()
@@ -98,7 +98,20 @@ def password_unlock(devconn, settings, pw: str):
     device.save_cli_key(devconn.cli_config_path(), got["key"], info["address"])
     if settings.get("api_key"):   # a key typed under System → Settings would win over the new one
         settings.update({"api_key": ""})
-    return unlock(devconn.resolve(), got["key"])
+    return got["key"]
+
+
+def apply_address(settings):
+    """Add-on option "Tiiny address": when filled in, it is the address the panel uses (set at every start)."""
+    addr = options().get("tiiny_address")
+    addr = addr.strip() if isinstance(addr, str) else ""
+    if not addr or len(addr) > 255 or any(c.isspace() or c in "/?#@" for c in addr):
+        if addr:
+            log("Tiiny address: the add-on option should be an address like 192.168.1.50. Ignored.")
+        return
+    if settings.get("device_address") != addr:
+        settings.update({"device_address": addr})
+        log("Tiiny address: taken from the add-on options.")
 
 
 def load_models(devconn, ids: list):
@@ -162,6 +175,7 @@ def update(devconn, body: dict) -> dict:
 
 
 def start(devconn, settings):
+    apply_address(settings)
     try:
         every = max(5, int(os.environ.get("TIINY_HA_AUTO_UNLOCK_EVERY") or 60))
     except ValueError:
@@ -198,7 +212,7 @@ def start(devconn, settings):
                                 pw_tried = True
                                 log("Auto-unlock: logging in with the password from the add-on options.")
                                 try:
-                                    state, why = password_unlock(devconn, settings, pw)
+                                    state, why = unlock(devconn.resolve(), password_login(devconn, settings, pw))
                                     if state == "locked":
                                         log(f"Auto-unlock: the password was accepted but the Tiiny is still locked. It answered: {why}.")
                                     else:
@@ -209,6 +223,14 @@ def start(devconn, settings):
                                     log(f"Auto-unlock: {e} Not trying the password again until the add-on restarts.")
                                 finally:
                                     pw = None
+                    elif auto and not key and not pw_refused and password():
+                        log("Auto-unlock: no key is saved yet. Logging in with the password from the add-on options.")
+                        try:
+                            password_login(devconn, settings, password())
+                            log("Auto-unlock: logged in, the key is saved.")
+                        except BadRequest as e:
+                            pw_refused = True
+                            log(f"Auto-unlock: {e} Not trying the password again until the add-on restarts.")
                     if state and state != "locked":
                         key_fails, next_key_try, pw_tried = 0, 0.0, False
                         if (pending or now) and want:

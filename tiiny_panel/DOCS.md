@@ -28,8 +28,9 @@ A local add-on that runs the community Tiiny Control Panel (1.4.1) and shows it 
 |---|---|---|
 | Trust the Home Assistant login | on | See above. |
 | Gateway: accept any numeric address | on | Lets apps on other machines use the gateway at `http://<HA address>:8766`. Off restores the original panel's check, which inside an add-on only Home Assistant itself can pass. |
+| Tiiny address | empty | Your Tiiny's address. When filled in you don't have to enter it in the panel. |
 | Unlock the Tiiny automatically | off | After the Tiiny restarts, unlocks it with the key saved at your last log in. See below. |
-| Tiiny password | empty | Optional fallback for automatic unlock when the saved key is refused. See below. |
+| Tiiny password | empty | Optional. Lets automatic unlock log in by itself when no key is saved yet or the saved key is refused. See below. |
 | Let the agent run commands | off | The agent may run commands inside the add-on's container, after your OK each time. |
 | Extra host names | none | Names used to open the panel directly on port 8765. |
 | Log every request | off | Troubleshooting. |
@@ -43,8 +44,11 @@ The add-on can do both steps for you.
 
 1. You log in once in the panel (Account → Log in). The Tiiny hands out a key and the panel saves it.
 2. With **Unlock the Tiiny automatically** on, the add-on checks once a minute. If the Tiiny is locked, it sends the saved key.
-3. If the Tiiny refuses the key and you filled in **Tiiny password**, the add-on logs in with it once, saves the new
-   key and unlocks. Without a password you log in by hand, once, and automatic unlock works again.
+3. If you filled in **Tiiny password**, the add-on logs in by itself whenever there is no saved key yet or the Tiiny
+   refuses the saved one, and saves the new key. Without a password you log in by hand in those cases.
+
+Fully hands-off setup: fill in **Tiiny address** and **Tiiny password**, switch on **Unlock the Tiiny
+automatically**, start the add-on. Within a minute it is logged in, and step 1 is not needed.
 
 The saved key survives restarts of the Tiiny, the add-on and Home Assistant. It may stop working after a password
 change or a TiinyOS update. The add-on tries the key three times and the password once per lock, then stops and

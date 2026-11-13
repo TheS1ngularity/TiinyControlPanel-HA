@@ -1,7 +1,7 @@
 name: Tiiny Control Panel
-version: "1.4.1-ha6"
+version: "1.4.1-ha7"
 slug: tiiny_panel
-description: Community web panel for a Tiiny AI device, shown inside Home Assistant
+description: Community web panel for a Tiiny AI device inside Home Assistant, with automatic unlock and model loading
 url: https://github.com/TheS1ngularity/TiinyControlPanel-HA
 arch:
   - amd64
@@ -28,6 +28,7 @@ environment:
 options:
   trust_ha_login: true
   gateway_any_address: true
+  tiiny_address: ""
   auto_unlock: false
   unlock_password: ""
   allow_commands: false
@@ -36,6 +37,7 @@ options:
 schema:
   trust_ha_login: bool
   gateway_any_address: bool
+  tiiny_address: str?
   auto_unlock: bool
   unlock_password: password?
   allow_commands: bool

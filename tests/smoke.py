@@ -170,14 +170,15 @@ def build(panel_src: Path, work: Path) -> Path:
     return app
 
 
-def start_panel(app: Path, work: Path, any_address: str, name: str = "", key: str = "test-key", password: str = "", autoload=()):
+def start_panel(app: Path, work: Path, any_address: str, name: str = "", key: str = "test-key", password: str = "", autoload=(),
+                address: str = "", locked: bool = True):
     name = name or any_address
-    DEVICE.update(state="locked", unlocks=0, good_key=0, logins=0, running=[], starts=[])
+    DEVICE.update(state="locked" if locked else "unlocked", unlocks=0, good_key=0, logins=0, running=[], starts=[])
     home = work / f"home-{name}"
     cfg = home / "config" / "tiiny-ui"
     cfg.mkdir(parents=True)
-    (cfg / "settings.json").write_text(json.dumps({"device_address": "127.0.0.1", "device_port": str(P_DEVICE), "api_key": key}))
-    (home / "options.json").write_text(json.dumps({"auto_unlock": True, "unlock_password": password}))
+    (cfg / "settings.json").write_text(json.dumps({"device_address": "" if address else "127.0.0.1", "device_port": str(P_DEVICE), "api_key": key}))
+    (home / "options.json").write_text(json.dumps({"auto_unlock": True, "unlock_password": password, "tiiny_address": address}))
     if autoload:
         (home / "share" / "tiiny-ui").mkdir(parents=True)
         (home / "share" / "tiiny-ui" / "ha-autoload.json").write_text(json.dumps({"selected": list(autoload)}))
@@ -339,6 +340,21 @@ def main():
         check(DEVICE["logins"] == 1 and DEVICE["state"] == "locked", "a refused password is tried once, not again",
               f"logins {DEVICE['logins']}")
         check(DEVICE["unlocks"] == 1, "the refused key is not sent again straight away", f"unlock calls {DEVICE['unlocks']}")
+    finally:
+        proc.terminate()
+        proc.wait(timeout=20)
+
+    print("Run 5: a new install with the address and password in the add-on options, Tiiny already unlocked", flush=True)
+    proc = start_panel(app, work, "1", name="fresh", key="", password="right-password", address="127.0.0.1", locked=False,
+                       autoload=["acme/chat-model"])
+    try:
+        check(wait_for(lambda: DEVICE["logins"] == 1), "with no saved key the add-on logs in with the password", f"logins {DEVICE['logins']}")
+        check(wait_for(lambda: any('"test-key"' in f.read_text() for f in (work / "home-fresh").rglob("config.json"))),
+              "the key is saved, at the address from the options")
+        time.sleep(7)
+        check(DEVICE["logins"] == 1 and DEVICE["unlocks"] == 0, "it logs in once and sends no unlock to an unlocked Tiiny",
+              f"logins {DEVICE['logins']} unlock calls {DEVICE['unlocks']}")
+        check(DEVICE["starts"] == [], "models are not loaded just because the add-on started", f"starts {DEVICE['starts']}")
     finally:
         proc.terminate()
         proc.wait(timeout=20)

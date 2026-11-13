@@ -9,6 +9,20 @@ or remotely through your normal Home Assistant login.
 > [0xStian](https://github.com/0xStian/tiiny-control-panel) (MIT). Please report problems with this add-on
 > [here](https://github.com/TheS1ngularity/TiinyControlPanel-HA/issues), not upstream.
 
+## What this add-on adds to the panel
+
+The panel itself is unchanged. On top of it, this add-on gives you:
+
+- **The panel in your Home Assistant sidebar**, at home and remotely, with no second sign-in (optional).
+- **Automatic unlock.** A Tiiny locks itself at every restart. The add-on unlocks it again, with the saved key or,
+  if you choose, your password.
+- **Automatic model loading.** Tick models under **Auto-load** in the panel and they are loaded after each unlock.
+- **Setup from the Configuration tab.** Tiiny address and password can be filled in there, so a new install logs in
+  by itself.
+- **A gateway other machines can reach** at `http://<HA address>:8766`, with a key per app.
+
+Automatic unlock and loading are explained [below](#after-a-restart-unlock-and-load-models-automatically).
+
 ## Install
 
 [![Add this repository to your Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FTheS1ngularity%2FTiinyControlPanel-HA)
@@ -20,6 +34,7 @@ Or by hand:
 2. Install **Tiiny Control Panel**. The image is built on your machine, so the first install takes a few minutes.
 3. Switch on **Show in sidebar**, then Start.
 4. Open **Tiiny** in the sidebar → Network: type your Tiiny's address → Account → **Log in**.
+   Or fill in the address and password on the add-on's Configuration tab before starting it (see below).
 
 ## What you need
 
@@ -48,8 +63,9 @@ remote access work.
 |---|---|---|
 | Trust the Home Assistant login | on | See above. |
 | Gateway: accept any numeric address | on | Lets apps on other machines use the panel's gateway at `http://<HA address>:8766`. |
+| Tiiny address | empty | Your Tiiny's address. When filled in you don't have to enter it in the panel. |
 | Unlock the Tiiny automatically | off | After the Tiiny restarts, unlocks it with the key saved at your last log in. See below. |
-| Tiiny password | empty | Optional fallback for automatic unlock when the saved key is refused. See below. |
+| Tiiny password | empty | Optional. Lets automatic unlock log in by itself when no key is saved yet or the saved key is refused. See below. |
 | Let the agent run commands | off | The panel's agent may run commands inside the add-on's container, after your OK each time. |
 | Extra host names | none | Names used to open the panel directly on port 8765. |
 | Log every request | off | Troubleshooting. |
@@ -65,8 +81,11 @@ The add-on can do both steps for you.
 
 1. You log in once in the panel (Account → Log in). The Tiiny hands out a key and the panel saves it.
 2. With **Unlock the Tiiny automatically** on, the add-on checks once a minute. If the Tiiny is locked, it sends the saved key.
-3. If the Tiiny refuses the key and you filled in **Tiiny password**, the add-on logs in with it once, saves the new
-   key and unlocks. Without a password you log in by hand, once, and automatic unlock works again.
+3. If you filled in **Tiiny password**, the add-on logs in by itself whenever there is no saved key yet or the Tiiny
+   refuses the saved one, and saves the new key. Without a password you log in by hand in those cases.
+
+Fully hands-off setup: fill in **Tiiny address** and **Tiiny password**, switch on **Unlock the Tiiny
+automatically**, start the add-on. Within a minute it is logged in, and step 1 is not needed.
 
 The saved key survives restarts of the Tiiny, the add-on and Home Assistant. It may stop working after a password
 change or a TiinyOS update. The add-on tries the key three times and the password once per lock, then stops and
@@ -102,8 +121,8 @@ image is built (`tiiny_panel/ha/patch_for_ha.py`). Each edit must match exactly,
   The panel's Log in button does it, or let the add-on do it (see above).
 - **No "install as an app"** when opened inside Home Assistant.
 - **Microphone features** (dictation, live meeting notes) are untested inside Home Assistant's frame and may not work.
-- **Panel updates are manual.** The add-on's version says which panel it contains (`1.4.1-ha6` is panel 1.4.1,
-  add-on revision 6). A new panel release needs a new add-on release; the panel's own updater is not used.
+- **Panel updates are manual.** The add-on's version says which panel it contains (`1.4.1-ha7` is panel 1.4.1,
+  add-on revision 7). A new panel release needs a new add-on release; the panel's own updater is not used.
 
 ## Your data
 

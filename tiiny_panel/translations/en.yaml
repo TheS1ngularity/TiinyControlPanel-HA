@@ -11,6 +11,11 @@ configuration:
       On: apps on other machines can use the gateway at http://<Home Assistant address>:8766. Off: the gateway
       only answers its internal add-on address, as the original panel does, so only Home Assistant itself can use it.
       Requests sent to a host name are refused either way.
+  tiiny_address:
+    name: Tiiny address (optional)
+    description: >-
+      Your Tiiny's address on your network, for example 192.168.1.50. When filled in, the panel uses it and you
+      don't have to enter it under Network. Give the Tiiny a fixed address in your router.
   auto_unlock:
     name: Unlock the Tiiny automatically
     description: >-
@@ -20,9 +25,9 @@ configuration:
   unlock_password:
     name: Tiiny password (optional)
     description: >-
-      Only used when automatic unlock is on and the Tiiny refuses the saved key: the add-on then logs in with this
-      password once and saves the new key. Leave empty to log in by hand in that case. The password is stored
-      unencrypted in Home Assistant and in its backups.
+      Only used when automatic unlock is on. The add-on logs in with it when no key is saved yet (a new install) or
+      when the Tiiny refuses the saved key, and saves the new key. Leave empty to log in by hand in the panel
+      instead. The password is stored unencrypted in Home Assistant and in its backups.
   allow_commands:
     name: Let the agent run commands
     description: >-

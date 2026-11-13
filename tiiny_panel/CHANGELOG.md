@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1-ha7
+- New option "Tiiny address": set the device's address from the Configuration tab instead of in the panel.
+- Fix: with automatic unlock on and a password filled in, the add-on now also logs in when no key is saved yet (a new install), not only when the Tiiny is locked.
+
 ## 1.4.1-ha6
 - New: **Auto-load** button in the panel's top bar. Tick models there and they are loaded automatically after the Tiiny is unlocked again.
 - New option "Tiiny password" (empty by default): fallback for automatic unlock when the Tiiny refuses the saved key.

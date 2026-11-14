@@ -1,5 +1,5 @@
 name: Tiiny Control Panel
-version: "1.4.1-ha7"
+version: "1.4.3-ha1"
 slug: tiiny_panel
 description: Community web panel for a Tiiny AI device inside Home Assistant, with automatic unlock and model loading
 url: https://github.com/TheS1ngularity/TiinyControlPanel-HA

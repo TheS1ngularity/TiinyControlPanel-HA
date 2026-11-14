@@ -30,6 +30,12 @@ DESIGN_VOICE = "A calm, warm voice, speaking clearly at a relaxed pace."
 CACHE_TTL_MS = 300000
 
 
+# TiinyOS 0.1.39 loads GLM-OCR, but answers every OCR request for it with 404 "Endpoint not found" (checked
+# 2026-11-10 with Tiiny's own `tiiny run ocr` too), so say what that means instead.
+OCR_NOT_ROUTED = ("Your Tiiny can't read text with {model} yet: it loads the model, but its OCR service answers "
+                  "\"Endpoint not found\". Tiiny's own command-line tool (tiiny run ocr) gets the same error, so this needs a fix from Tiiny.")
+
+
 class ToolError(Exception):
     """A tool couldn't do it: the message goes back to the assistant as the tool's answer (isError)."""
 
@@ -437,8 +443,13 @@ class Toolbox:
         info = self._info()
         model = gateway.resolve(a.get("model"), "ocr", app, info)
         with self._use(app, model):
-            data, ctype = self._post(info, "/v1/ocr?" + urllib.parse.urlencode({"model": model}),
-                                     {"input": f"data:{mime};base64,{base64.b64encode(img).decode()}", "response_format": "json"})
+            try:   # the model in the body too, as Tiiny's own `tiiny run ocr` sends it
+                data, ctype = self._post(info, "/v1/ocr?" + urllib.parse.urlencode({"model": model}),
+                                         {"model": model, "input": f"data:{mime};base64,{base64.b64encode(img).decode()}", "response_format": "json"})
+            except ToolError as e:
+                if "endpoint not found" in str(e).lower():
+                    raise ToolError(OCR_NOT_ROUTED.format(model=short(model))) from None
+                raise
         try:
             j = json.loads(data)
         except ValueError:

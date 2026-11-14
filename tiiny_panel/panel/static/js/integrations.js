@@ -31,7 +31,13 @@ function viewIntegrations(root, ctx) {
   const DEVICE = `http://${devHost}`;
   let st = null;   // /api/apps: {apps, gateway, scopes, unload_choices, bridge}
   let model = '';
-  const G = () => st?.gateway?.url || 'http://127.0.0.1:8766';
+  // The gateway's address in the setups: on this computer, 127.0.0.1. Opened from another computer while the listener for
+  // other computers runs, the address the browser reached the panel by, with the gateway's port: that listener answers
+  // any IP address (also through port mapping or NAT), and in server mode the names the panel answers.
+  const here = location.hostname.replace(/^\[|\]$/g, '');
+  const fromHere = !['127.0.0.1', 'localhost', '::1', ''].includes(here);
+  const lanHere = () => { const g = st?.gateway; return fromHere && g?.lan?.running ? `${g.lan.tls ? 'https' : 'http'}://${location.hostname}:${g.port}` : ''; };
+  const G = () => lanHere() || st?.gateway?.url || 'http://127.0.0.1:8766';
   const appsBody = h('div', {}, loadingBlock());
   const out = h('div', {class: 'stack'});
   const modelSel = h('select', {class: 'input sm', style: {width: 'auto', maxWidth: 'min(300px, 100%)'}, 'aria-label': 'Model for the examples'});
@@ -132,7 +138,7 @@ function viewIntegrations(root, ctx) {
         h('span', {class: 'small'}, `${g.error} Start the panel with --gateway-port and another port, or stop the other program.`))) : null,
       h('div', {class: 'stack-sm small'},
         h('div', {class: 'row wrap gap-sm'}, switchInput(lan.enabled, v => setGateway({lan: v}), 'Apps on other computers'),
-          h('span', {}, 'Apps on other computers in your network'), lan.running ? h('code', {}, lan.url) : lan.error ? h('span', {class: 'muted'}, lan.error) : null),
+          h('span', {}, 'Apps on other computers in your network'), lan.running ? h('code', {}, lanHere() || lan.url) : lan.error ? h('span', {class: 'muted'}, lan.error) : null),
         lan.enabled && !lan.tls ? h('p', {class: 'muted'}, 'Keys and answers then travel unencrypted through your network. For HTTPS, start the panel with --tls-cert and --tls-key.') : null,
         h('div', {class: 'row wrap gap-sm'}, switchInput(g.keyless_ollama, v => setGateway({keyless_ollama: v}), 'Ollama apps without a key'),
           h('span', {}, 'Let Ollama apps that can’t send a key chat and make embeddings (from this computer only)'))),
@@ -306,7 +312,8 @@ function viewIntegrations(root, ctx) {
     const K = 'YOUR_APP_KEY';
     const group = (title, ic, items) => card({title, ic}, h('div', {class: 'snippets'}, items));
     clear(out).append(
-      remote ? null : h('p', {class: 'small muted'}, 'The setups below use YOUR_APP_KEY: put in the key of the app you added above. “default” means whichever chat model is loaded; a model that isn’t loaded loads when the app asks for it.'),
+      remote ? null : h('p', {class: 'small muted'}, 'The setups below use YOUR_APP_KEY: put in the key of the app you added above. “default” means whichever chat model is loaded; a model that isn’t loaded loads when the app asks for it.'
+        + (lanHere() ? ' Opened from another computer, they use the address you reached the panel by, with the gateway’s port.' : '')),
       group('AI assistants (MCP)', 'spark', [...setupsFor('claude-code', K), ...setupsFor('claude-desktop', K), ...setupsFor('cursor', K)]),
       group('Agents', 'bolt', [...setupsFor('openclaw', K), ...setupsFor('hermes', K)]),
       group('Code', 'terminal', setupsFor('custom', K)),

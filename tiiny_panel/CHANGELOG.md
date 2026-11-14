@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.3-ha1
+- Tiiny Control Panel 1.4.3. What's new in the panel: https://github.com/0xStian/tiiny-control-panel/releases/tag/v1.4.3
+
 ## 1.4.1-ha7
 - New option "Tiiny address": set the device's address from the Configuration tab instead of in the panel.
 - Fix: with automatic unlock on and a password filled in, the add-on now also logs in when no key is saved yet (a new install), not only when the Tiiny is locked.

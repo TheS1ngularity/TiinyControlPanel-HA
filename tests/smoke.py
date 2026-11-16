@@ -170,9 +170,8 @@ def build(panel_src: Path, work: Path) -> Path:
     return app
 
 
-def start_panel(app: Path, work: Path, any_address: str, name: str = "", key: str = "test-key", password: str = "", autoload=(),
+def start_panel(app: Path, work: Path, name: str = "main", key: str = "test-key", password: str = "", autoload=(),
                 address: str = "", locked: bool = True):
-    name = name or any_address
     DEVICE.update(state="locked" if locked else "unlocked", unlocks=0, good_key=0, logins=0, running=[], starts=[])
     home = work / f"home-{name}"
     cfg = home / "config" / "tiiny-ui"
@@ -183,7 +182,7 @@ def start_panel(app: Path, work: Path, any_address: str, name: str = "", key: st
         (home / "share" / "tiiny-ui").mkdir(parents=True)
         (home / "share" / "tiiny-ui" / "ha-autoload.json").write_text(json.dumps({"selected": list(autoload)}))
     env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / "config"), XDG_DATA_HOME=str(home / "share"),
-               TIINY_UI_TLS="off", TIINY_HA_INGRESS_FROM="127.0.0.1", TIINY_HA_GATEWAY_ANY_ADDRESS=any_address,
+               TIINY_UI_TLS="off", TIINY_HA_INGRESS_FROM="127.0.0.1",
                TIINY_HA_AUTO_UNLOCK="1", TIINY_HA_AUTO_UNLOCK_EVERY="5", TIINY_HA_AUTOLOAD_RETRY="1",
                HA_OPTIONS_FILE=str(home / "options.json"))
     log = open(work / f"panel-{name}.log", "w")
@@ -261,7 +260,7 @@ def main():
     base = f"http://127.0.0.1:{P_PROXY}{PREFIX}"
 
     print("Run 1: all add-on options on", flush=True)
-    proc = start_panel(app, work, "1", autoload=["acme/chat-model"])
+    proc = start_panel(app, work, autoload=["acme/chat-model"])
     try:
         code, html = call("GET", base + "/")
         check(code == 200 and "static/ha-ingress.js" in html, "through Ingress the page opens without a sign-in", f"HTTP {code}")
@@ -303,21 +302,8 @@ def main():
         proc.terminate()
         proc.wait(timeout=20)
 
-    print('Run 2: "Gateway: accept any numeric address" off', flush=True)
-    proc = start_panel(app, work, "0")
-    try:
-        _, html = call("GET", base + "/")
-        token = html.split('name="tiiny-token" content="')[1].split('"')[0]
-        got, info = gateway_status(base, token, "10.9.8.7:%d" % P_GATEWAY)
-        check(got == 403, "gateway, request addressed to another numeric address: refused, as upstream", f"got {got} {info}")
-        got, info = gateway_status(base, token, "")
-        check(got == 401, "gateway, request addressed to its own address: let in", f"got {got} {info}")
-    finally:
-        proc.terminate()
-        proc.wait(timeout=20)
-
-    print("Run 3: the saved key is refused, the password option is filled in", flush=True)
-    proc = start_panel(app, work, "1", name="password", key="stale-key", password="right-password", autoload=["acme/embed-model"])
+    print("Run 2: the saved key is refused, the password option is filled in", flush=True)
+    proc = start_panel(app, work, name="password", key="stale-key", password="right-password", autoload=["acme/embed-model"])
     try:
         check(wait_for(lambda: DEVICE["state"] == "unlocked"), "a refused key falls back to the password and unlocks",
               f"logins {DEVICE['logins']} unlock calls {DEVICE['unlocks']}")
@@ -332,8 +318,8 @@ def main():
     check("right-password" not in logtext and "stale-key" not in logtext and "test-key" not in logtext, "neither password nor keys are in the log")
     check("The Tiiny answered: HTTP 200, status=not_auth" in logtext, "the log says what the Tiiny answered when it refused")
 
-    print("Run 4: the saved key and the password are both refused", flush=True)
-    proc = start_panel(app, work, "1", name="wrong", key="stale-key", password="wrong-password")
+    print("Run 3: the saved key and the password are both refused", flush=True)
+    proc = start_panel(app, work, name="wrong", key="stale-key", password="wrong-password")
     try:
         wait_for(lambda: DEVICE["logins"] >= 1)
         time.sleep(12)
@@ -344,8 +330,8 @@ def main():
         proc.terminate()
         proc.wait(timeout=20)
 
-    print("Run 5: a new install with the address and password in the add-on options, Tiiny already unlocked", flush=True)
-    proc = start_panel(app, work, "1", name="fresh", key="", password="right-password", address="127.0.0.1", locked=False,
+    print("Run 4: a new install with the address and password in the add-on options, Tiiny already unlocked", flush=True)
+    proc = start_panel(app, work, name="fresh", key="", password="right-password", address="127.0.0.1", locked=False,
                        autoload=["acme/chat-model"])
     try:
         check(wait_for(lambda: DEVICE["logins"] == 1), "with no saved key the add-on logs in with the password", f"logins {DEVICE['logins']}")

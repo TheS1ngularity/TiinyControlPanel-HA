@@ -6,11 +6,11 @@ configuration:
       in the sidebar for administrators only, which hides it but may not block other users.
       Off: every browser must sign in to the panel itself with a sign-in link, also inside Home Assistant.
   gateway_any_address:
-    name: "Gateway: accept any numeric address"
+    name: "Gateway: accept any numeric address (no longer used)"
     description: >-
-      On: apps on other machines can use the gateway at http://<Home Assistant address>:8766. Off: the gateway
-      only answers its internal add-on address, as the original panel does, so only Home Assistant itself can use it.
-      Requests sent to a host name are refused either way.
+      No longer has any effect. Since panel 1.4.3 the gateway always answers apps on other machines at
+      http://<Home Assistant address>:8766, as long as "Apps on other computers" is on in the panel. Requests sent
+      to a host name are still refused.
   tiiny_address:
     name: Tiiny address (optional)
     description: >-

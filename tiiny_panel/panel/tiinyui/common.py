@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import mimetypes
 import os
 import re
@@ -58,6 +59,26 @@ def host_only(value: str) -> str:
     if v.count(":") == 1:
         v = v.split(":")[0]
     return v if re.fullmatch(r"[A-Za-z0-9.\-:%]+", v) else ""
+
+
+def network_host_ok(host: str, names=()) -> bool:
+    """The Host check for what other devices reach over the network (the panel in server mode, the gateway's listener
+    for other computers): an IP address with any port, localhost, or one of `names` (lowercase, as browsers send them).
+    A website trying to get in through DNS rebinding points a name it controls at this computer, so it sends that name
+    and is refused. Any IP address is fine: port mapping and NAT (a container, a VM) change the address and port a
+    request reaches, but not its Host."""
+    host = (host or "").strip().lower()
+    if host.startswith("["):   # [IPv6]:port
+        name = host[1:host.find("]")] if "]" in host else ""
+    else:
+        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    if not name:
+        return False
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return name == "localhost" or name in names
 
 
 EXTRA_MIME = {".webmanifest": "application/manifest+json", ".glb": "model/gltf-binary", ".gltf": "model/gltf+json",

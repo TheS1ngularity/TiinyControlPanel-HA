@@ -2905,9 +2905,17 @@ function toolOCR(el, {picker}) {
         const model = mp.value;
         if (!(await ensureLoaded(model))) return;
         clear(out).append(loadingBlock('Reading…'));
-        const r = await dev('/v1/ocr', {method: 'POST', query: {model}, json: {input: dataUrl, response_format: 'json'}, label: 'OCR', timeout: 900, silent: true});
+        // the model in the body too, as Tiiny's own `tiiny run ocr` sends it
+        const r = await dev('/v1/ocr', {method: 'POST', query: {model}, json: {model, input: dataUrl, response_format: 'json'}, label: 'OCR', timeout: 900, silent: true});
         clear(out);
-        if (!r.ok) { out.append(errorBlock(r.error, {title: 'OCR failed'})); return; }
+        if (!r.ok) {
+          // TiinyOS 0.1.39 loads GLM-OCR but answers every OCR request for it with 404 "Endpoint not found" (Tiiny's own tool too)
+          const why = r.status === 404 && /endpoint not found/i.test(r.error || '')
+            ? `Your Tiiny can’t read text with ${shortName(model)} yet. It loads the model, but its OCR service answers “Endpoint not found”. Tiiny’s own command-line tool (tiiny run ocr) gets the same error, so this needs a fix from Tiiny.`
+            : r.error;
+          out.append(errorBlock(why, {title: 'OCR failed'}));
+          return;
+        }
         const j = r.json;
         let text = typeof j === 'object' && j ? pick(j, 'text', 'markdown', 'content', 'result') : r.text;
         if (Array.isArray(text)) text = text.map(x => typeof x === 'string' ? x : pick(x, 'text', 'content') || '').join('\n');

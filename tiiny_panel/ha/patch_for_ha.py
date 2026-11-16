@@ -8,13 +8,13 @@ What changes:
      Host/Origin checks and counts as a signed-in device with full access: Home Assistant's own login (admin
      only, see config.yaml) already decided who gets in.
   2. The page may be framed by its own origin (Home Assistant shows add-ons in a frame).
-  3. Request bodies that Ingress sends in chunks are collected before the panel reads them.
-  4. Optional (add-on option): the gateway's network listener accepts requests addressed to any numeric
-     address, so apps on other machines can reach it through Home Assistant's address.
-  5. Optional: unlock the Tiiny automatically after it restarts, and load chosen models afterwards. The code is
+  3. Optional: unlock the Tiiny automatically after it restarts, and load chosen models afterwards. The code is
      in ha_watch.py (copied to tiinyui/); here it is only started and given two routes for its picker.
-  6. index.html loads its files by relative address, plus static/ha-ingress.js, which prefixes the
+  4. index.html loads its files by relative address, plus static/ha-ingress.js, which prefixes the
      panel's requests with the Ingress path, and static/ha-autoload.js, the picker.
+
+Two edits that earlier versions needed are gone because the panel handles both itself since 1.4.3: reading request bodies
+sent in chunks (Ingress sends them that way), and the gateway's listener for other computers accepting any IP address.
 """
 import sys
 from pathlib import Path
@@ -41,38 +41,6 @@ def ha_ingress(handler) -> bool:
     return bool(HA_INGRESS_FROM) and str(handler.client_address[0]) == HA_INGRESS_FROM and bool(handler.headers.get("X-Ingress-Path"))
 
 
-def ha_unchunk(handler, limit=4 << 30):
-    """Home Assistant's Ingress proxy streams request bodies in chunks, without a Content-Length. The panel reads
-    bodies by Content-Length, so collect the chunks first (in memory up to 8 MB, then in a temporary file)."""
-    if "chunked" not in (handler.headers.get("Transfer-Encoding") or "").lower():
-        return
-    import tempfile
-    buf, total, rfile = tempfile.SpooledTemporaryFile(max_size=8 << 20), 0, handler.rfile
-    while True:
-        size = int(rfile.readline(1024).split(b";")[0].strip() or b"0", 16)
-        if size == 0:
-            while rfile.readline(8192) not in (b"\\r\\n", b"\\n", b""):
-                pass   # trailers
-            break
-        total += size
-        if total > limit:
-            raise BadRequest("Request body is too large")
-        left = size
-        while left:
-            part = rfile.read(min(1 << 20, left))
-            if not part:
-                raise BadRequest("The request body ended early")
-            buf.write(part)
-            left -= len(part)
-        rfile.readline(8)   # the line end after each chunk
-    buf.seek(0)
-    handler.rfile = buf
-    del handler.headers["Transfer-Encoding"]
-    del handler.headers["Content-Length"]
-    handler.headers["Content-Length"] = str(total)
-    handler.close_connection = True
-
-
 CSP = ("default-src 'self'; script-src 'self'; "''')
 
 edit(ui, '''       "frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
@@ -82,8 +50,6 @@ FILE_CSP''')
 edit(ui, '''            host = (self.headers.get("Host") or "").strip().lower()
             if not self.host_ok(host):''', '''            host = (self.headers.get("Host") or "").strip().lower()
             ingress = ha_ingress(self)
-            if ingress:
-                ha_unchunk(self)
             if not ingress and not self.host_ok(host):''')
 
 edit(ui, '''            if self.server_mode():  # server mode: every device signs in, with full or limited access''',
@@ -122,33 +88,6 @@ edit(ui, '''    def api_models_borrowed(self, q):
 ''')
 
 edit(ui, '''                 "/api/apps", "/api/gateway")''', '''                 "/api/apps", "/api/gateway", "/api/ha/")''')
-
-gw = app / "tiinyui" / "gateway.py"
-
-edit(gw, '''MAX_BODY = 100 * 1024 ** 2''', '''def ha_numeric_host(server, host: str) -> bool:
-    """Add-on option "Gateway: accept any numeric address". An add-on has its own internal address, while apps on
-    other machines reach the gateway through Home Assistant's address, so the Host they send never matches the one
-    the gateway listens on. With the option on, the network listener also accepts a Host that is a plain IP address.
-    A website attacking through DNS rebinding has to send a name, so it is still refused."""
-    import os
-    if not getattr(server, "lan", False) or os.environ.get("TIINY_HA_GATEWAY_ANY_ADDRESS") != "1":
-        return False
-    host = (host or "").strip()
-    if host.startswith("["):
-        name = host[1:host.find("]")] if "]" in host else ""
-    else:
-        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
-    try:
-        ipaddress.ip_address(name)
-        return True
-    except ValueError:
-        return False
-
-
-MAX_BODY = 100 * 1024 ** 2''')
-
-edit(gw, '''            if host not in self.server.hosts:''',
-     '''            if host not in self.server.hosts and not ha_numeric_host(self.server, host):''')
 
 index = app / "static" / "index.html"
 text = index.read_text(encoding="utf-8")

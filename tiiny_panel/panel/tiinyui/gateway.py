@@ -12,9 +12,11 @@ if needed, following the app's policy (tiinyui/npu.py), and borrows a model it h
 again a while after the app's last use (common.Borrowed); forwards the request with the device's key, relaying the
 answer as it arrives (streams stay streams); and notes the work as the app's, so the dashboard's Right now names it.
 
-Safety: only Host headers for this computer (against DNS rebinding); requests from web pages (an http(s) Origin) are
-refused, with no CORS; keys are stored as hashes (apps.json, mode 600, like pairing.py); repeated wrong keys pause
-answering. An optional second listener (gateway_lan) serves apps on other computers in your network.
+Safety: against DNS rebinding, the listener on 127.0.0.1 answers only Host headers with this computer's own names for it
+(Handler.host_ok); requests from web pages (an http(s) Origin) are refused, with no CORS; keys are stored as hashes
+(apps.json, mode 600, like pairing.py); repeated wrong keys pause answering. An optional second listener (gateway_lan)
+serves apps on other computers in your network, always with a key. It answers any IP address, like the panel in server
+mode, and in server mode the names the panel answers.
 """
 
 from __future__ import annotations
@@ -33,14 +35,17 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import VERSION, activity, device, npu
-from .common import BORROWED, USAGE, DeviceError, atomic_write, error_message, new_id
+from . import VERSION, activity, device, httpbody, npu
+from .common import BORROWED, USAGE, DeviceError, atomic_write, error_message, network_host_ok, new_id
 
 DEFAULT_PORT = 8766
 MAX_BODY = 100 * 1024 ** 2
 KEY_PREFIX = "tiiny_"
 MAX_FAILURES = 20           # wrong keys per 5 minutes from one address before the gateway stops listening to it
 OLLAMA_VERSION = "0.12.0"   # what /api/version answers: Ollama apps check that they're talking to a recent enough server
+FORBIDDEN_LAN_HOST = ("Forbidden host. Apps on other computers reach the Tiiny gateway by this computer's IP address. In "
+                      "server mode, the names the panel answers work too: add a name to TIINY_UI_PUBLIC_NAMES (or "
+                      "--public-name) on the server, then restart the panel.").encode()
 SCOPES = {
     "chat": "Chat and text generation",
     "embeddings": "Embeddings and reranking",
@@ -259,15 +264,18 @@ class _Server(ThreadingHTTPServer):
 
     def handle_error(self, request, client_address):
         import sys
-        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, ssl.SSLError)):
-            return
+        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, socket.timeout,
+                                          ssl.SSLError)):
+            return   # socket.timeout: Python 3.8 and 3.9
         super().handle_error(request, client_address)
 
 
 class Gateway:
-    def __init__(self, devconn, settings, apps: Apps, *, tls=None, lan_ip=None, mcp=None, verbose=False):
+    def __init__(self, devconn, settings, apps: Apps, *, tls=None, lan_ip=None, names=(), mcp=None, verbose=False):
+        """names: the host names the listener for other computers answers besides IP addresses (server mode's)."""
         self.devconn, self.settings, self.apps = devconn, settings, apps
         self.tls, self.lan_ip, self.mcp, self.verbose = tls or {}, lan_ip, mcp, verbose
+        self.names = frozenset(names)
         self.lock = threading.Lock()
         self.servers = {"local": None, "lan": None}
         self.errors = {"local": "", "lan": ""}
@@ -284,8 +292,7 @@ class Gateway:
                                   else f"Couldn't listen on {host}:{self.port()}: {e}")
             return
         srv.gateway, srv.lan = self, which == "lan"
-        srv.hosts = {f"127.0.0.1:{self.port()}", f"localhost:{self.port()}", f"[::1]:{self.port()}"} if which == "local" \
-            else {f"{host}:{self.port()}"}
+        srv.hosts = {f"127.0.0.1:{self.port()}", f"localhost:{self.port()}", f"[::1]:{self.port()}"}   # for 127.0.0.1
         if which == "lan" and self.tls.get("cert"):
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             ctx.load_cert_chain(self.tls["cert"], self.tls["key"])
@@ -437,7 +444,7 @@ def usage_of(obj) -> tuple:
         return 0, 0
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(httpbody.ClosingHandler, BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = f"TiinyGateway/{VERSION}"
     timeout = 120   # an idle kept-open connection is closed after this (answers themselves can take as long as they need)
@@ -456,6 +463,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -488,18 +496,21 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return False
 
-    def read_body(self) -> bytes:
-        if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
-            self.close_connection = True
-            raise Refused(411, "Send the request with a Content-Length.", "invalid_request")
+    def host_ok(self, host: str) -> bool:
+        """The Host check, against DNS rebinding: a website that points a name it controls at this computer sends that
+        name. 127.0.0.1 answers only this computer's own names for it, with the gateway's port. The listener for other
+        computers answers any IP address with any port, since port mapping and NAT (a container, a VM) change the
+        address and port apps connect to, and in server mode the names the panel answers (common.network_host_ok)."""
+        if self.server.lan:
+            return network_host_ok(host, self.server.gateway.names)
+        return host in self.server.hosts
+
+    def read_body(self) -> bytes:   # noqa: the base takes a limit; the gateway has one
+        """The request's body, sent with a Content-Length or in chunks (httpbody.ClosingHandler)."""
         try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            length = -1
-        if length < 0 or length > MAX_BODY:
-            self.close_connection = True
-            raise Refused(413, "That request is too large (100 MB at most).", "invalid_request")
-        return self.rfile.read(length) if length else b""
+            return super().read_body(MAX_BODY, "That request is too large (100 MB at most).")
+        except httpbody.BodyError as e:
+            raise Refused(e.status, str(e), "invalid_request") from None
 
     def key(self) -> str:
         auth = self.headers.get("Authorization") or ""
@@ -536,10 +547,9 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path.rstrip("/") or "/"
         family = family_of(path)
         try:
-            host = (self.headers.get("Host") or "").strip().lower()
-            if host not in self.server.hosts:
+            if not self.host_ok((self.headers.get("Host") or "").strip().lower()):
                 self.close_connection = True
-                return self.send_raw(403, b"Forbidden host", "text/plain; charset=utf-8")
+                return self.send_raw(403, FORBIDDEN_LAN_HOST if self.server.lan else b"Forbidden host", "text/plain; charset=utf-8")
             origin = (self.headers.get("Origin") or "").strip().lower()
             if origin.startswith(("http://", "https://")) or origin == "null":
                 self.close_connection = True
@@ -726,6 +736,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(resp.status)
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         if streaming:
             self.send_header("Connection", "close")
             self.send_header("X-Accel-Buffering", "no")

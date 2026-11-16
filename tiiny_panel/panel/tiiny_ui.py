@@ -63,12 +63,12 @@ from pathlib import Path
 if os.name == "nt":  # the in-page terminal needs a Unix pseudo-terminal
     sys.exit("Tiiny Control Panel runs on Linux and macOS. Windows isn't supported yet.")
 
-from tiinyui import (VERSION, activity, agenttools, backup, commands, decide, device, firmware, gateway, history, launcher, mcp, npu,
-                     routines, selfupdate, tlscert, tools, turns, webfetch, websearch)
+from tiinyui import (VERSION, activity, agenttools, backup, commands, decide, device, firmware, gateway, history, httpbody, launcher,
+                     mcp, npu, routines, selfupdate, tlscert, tools, turns, webfetch, websearch)
 from tiinyui.browserauth import CODE_TTL, DEVICE_CODE_TTL, STORAGE_KEY, BrowserAuth
 from tiinyui.clitools import Runtime
 from tiinyui.common import (BORROWED, USAGE, BadRequest, DeviceError, atomic_write, clamp_int, data_dir, error_message, guess_mime,
-                            mask, safe_name, valid_id)
+                            mask, network_host_ok, safe_name, valid_id)
 from tiinyui.device import (FORWARD_HEADERS, MAX_DEVICE_RESPONSE, SERVICES, DeviceConn, build_path, call as device_call,
                             device_json, device_open, discover_devices, multipart_body)
 from tiinyui.device import vault_upload as device_vault_upload
@@ -111,7 +111,8 @@ TURNS = None    # chat replies the panel writes (tiinyui/turns.py), made in main
 ROUTINES = None  # things the panel does on a schedule (tiinyui/routines.py), started in main()
 # Server mode (--server, or TIINY_UI_SERVER=1): the panel runs on an always-on machine (a home server, a NAS, the Docker
 # image) and every device signs in with a one-time link, each with full or limited access (tiinyui/pairing.py).
-# names: host names the Host check accepts besides IP addresses; url: the address printed in sign-in links;
+# names: host names accepted besides IP addresses by server mode's Host check and by the gateway's listener for other
+# computers; url: the address printed in sign-in links;
 # container: running in the Docker image (TIINY_UI_CONTAINER=1), which is updated by pulling a new image.
 SERVER = {"on": False, "names": set(), "url": "", "container": False}
 
@@ -121,23 +122,9 @@ def env_on(name: str) -> bool:
 
 
 def server_host_ok(host: str) -> bool:
-    """Server mode's Host check: an IP address (with any port), localhost, or a name listed with --public-name.
-    A website trying to reach the panel through DNS rebinding sends its own domain name, so it's refused."""
-    host = (host or "").strip().lower()
-    if not host:
-        return False
-    if host.startswith("["):   # [IPv6]:port
-        name = host[1:host.find("]")] if "]" in host else ""
-    else:
-        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
-    if not name:
-        return False
-    try:
-        ipaddress.ip_address(name)
-        return True
-    except ValueError:
-        pass
-    return name == "localhost" or name in SERVER["names"]
+    """Server mode's Host check: an IP address (with any port), localhost, or a name in SERVER["names"]. The gateway's
+    listener for other computers uses the same rule (common.network_host_ok)."""
+    return network_host_ok(host, SERVER["names"])
 
 
 def server_base_url(port: int) -> str:
@@ -373,9 +360,10 @@ COMMANDS_OFF = ("Commands are switched off. To let agent mode run commands and r
                 "start the panel with python3 tiiny_ui.py --allow-commands. It still asks before every command and file change.")
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(httpbody.ClosingHandler, BaseHTTPRequestHandler):
     server_version = "TiinyUI/" + VERSION
     protocol_version = "HTTP/1.1"
+    timeout = 120   # an idle kept-open connection is closed after this (like the gateway's); an answer can take as long as it needs
 
     ROUTES = [
         ("GET", r"/api/health", "api_health"),
@@ -690,10 +678,10 @@ class Handler(BaseHTTPRequestHandler):
         except BadRequest as e:
             self.close_connection = True
             if not self._responded:
-                self.send_json(400, {"error": str(e)})
+                self.send_json(getattr(e, "status", 400), {"error": str(e)})
             elif self._sse:
                 self.sse_safe("error", {"message": str(e)})
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, socket.timeout):   # socket.timeout: Python 3.8 and 3.9
             self.close_connection = True
         except Exception as e:  # noqa: BLE001
             self.close_connection = True
@@ -722,14 +710,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_bytes(status, text.encode(), "text/plain; charset=utf-8")
 
     def read_json(self) -> dict:
-        try:
-            length = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            length = 0
-        if length > MAX_JSON_BODY:
-            self.close_connection = True
-            raise BadRequest("Request body is too large")
-        raw = self.rfile.read(length) if length > 0 else b""
+        raw = self.read_body(MAX_JSON_BODY, "Request body is too large")   # httpbody.ClosingHandler: a length, or chunks
         if not raw:
             return {}
         try:
@@ -851,13 +832,10 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return self.send_text(403, "Cross-origin request refused")
         try:
-            n = int(self.headers.get("Content-Length") or 0)
-        except ValueError:
-            n = -1
-        if n < 0 or n > 2048:
-            self.close_connection = True
+            raw = self.read_body(2048)
+        except httpbody.BodyError:
             return self.send_text(400, "That isn't a setup code.")
-        form = urllib.parse.parse_qs(self.rfile.read(n).decode("utf-8", "replace")) if n else {}
+        form = urllib.parse.parse_qs(raw.decode("utf-8", "replace")) if raw else {}
         if PAIRING.blocked():
             self.close_connection = True
             return self.setup_page(429, "Too many wrong codes. Wait a few minutes, then try again.")
@@ -2063,30 +2041,22 @@ class Handler(BaseHTTPRequestHandler):
     # -- API: files ---------------------------------------------------------------------
     def api_upload(self, q):
         name = safe_name(q.get("name", [""])[0]) or "upload.bin"
-        try:
-            length = int(self.headers.get("Content-Length") or -1)
-        except ValueError:
-            length = -1
-        if length < 0:
-            self.close_connection = True
-            raise BadRequest("Content-Length is required")
-        if length > MAX_UPLOAD:
-            self.close_connection = True
-            return self.send_json(413, {"error": "That file is too large."})
+        kind, length = httpbody.framing(self.headers)
+        if kind == "none":
+            raise BadRequest("Send the file with a Content-Length or in chunks.")
+        if length and length > MAX_UPLOAD:
+            raise httpbody.BodyError(413, "That file is too large.")
         d = tempfile.mkdtemp(dir=RT.work / "uploads")
         path = os.path.join(d, name)
-        remaining = length
-        with open(path, "wb") as f:
-            while remaining > 0:
-                chunk = self.rfile.read(min(1 << 20, remaining))
-                if not chunk:
-                    break
-                f.write(chunk)
-                remaining -= len(chunk)
-        if remaining:
+        try:
+            with open(path, "wb") as f:
+                for piece in self.iter_body(MAX_UPLOAD, "That file is too large."):
+                    f.write(piece)
+        except httpbody.BodyError as e:
             shutil.rmtree(d, ignore_errors=True)
-            self.close_connection = True
-            raise BadRequest("The upload was interrupted.")
+            if e.ended:
+                raise httpbody.BodyError(400, "The upload was interrupted.") from None
+            raise
         self.send_json(200, RT.register(path, name, "upload"))
 
     def api_file(self, fid, q):
@@ -2219,8 +2189,9 @@ class Server(ThreadingHTTPServer):
 
     def handle_error(self, request, client_address):
         # A browser closing a tab mid-request is normal; only print real problems.
-        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, ssl.SSLError)):
-            return   # ... and plain HTTP or a scanner on an HTTPS port
+        if isinstance(sys.exc_info()[1], (ConnectionResetError, BrokenPipeError, ConnectionAbortedError, TimeoutError, socket.timeout,
+                                          ssl.SSLError)):
+            return   # ... and plain HTTP or a scanner on an HTTPS port, and a client that went quiet (socket.timeout: Python 3.8, 3.9)
         super().handle_error(request, client_address)
 
 
@@ -2353,7 +2324,7 @@ def main():
     if args.gateway_port:
         SETTINGS.override("gateway_port", args.gateway_port)
     GATEWAY = gateway.Gateway(DEVCONN, SETTINGS, gateway.Apps(CONFIG_DIR / "apps.json"), tls=TLS, verbose=VERBOSE,
-                              lan_ip=lambda: lan_ip_towards(DEVCONN.resolve().get("address") or ""),
+                              lan_ip=lambda: lan_ip_towards(DEVCONN.resolve().get("address") or ""), names=SERVER["names"],
                               mcp=mcp.Server(tools.Toolbox(DEVCONN, SETTINGS, GALLERY, RT)).handle)
     GATEWAY.apply()
     gw = GATEWAY.status()

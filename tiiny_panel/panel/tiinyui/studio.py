@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import random
 import re
 import shutil
 import struct
@@ -47,6 +48,12 @@ def _q(model_id: str) -> str:
     return urllib.parse.quote(model_id or "", safe="")
 
 
+def _for_model(path: str, model: str) -> str:
+    """A 3D service path routed to `model`. With two 3D models loaded, the Tiiny sends calls that don't name one to just
+    one of them, which can change during a job, and it doesn't know the other's tasks ("Image-to-3D task not found")."""
+    return f"{path}?model={_q(model)}" if model else path
+
+
 def run_abortable(owner, fn, *args, **kwargs):
     """Run a blocking device call in a helper thread, so Cancel ends the job (owner) right away."""
     box = {}
@@ -71,6 +78,14 @@ def run_abortable(owner, fn, *args, **kwargs):
 DEVICE_UPLOAD_LIMIT = 200 * 1024 * 1024
 # /3d/capabilities names some inputs differently from the upload field the server reads
 FORM_FIELD = {"material_artifact": "material", "mesh_glb": "mesh"}
+# The parameters Tiiny's docs promise on these steps for every 3D model. TRELLIS.2 lists them per step itself
+# (stage_specs); Hunyuan3D-2.1 lists only its own extra ones, so these are added for models like it.
+COMMON_3D_PARAMS = {"shape": {"seed", "output_precision", "inference_quality"}, "simplify": {"asset_quality"},
+                    "texture": {"inference_quality"}, "export": {"asset_quality"}}
+# A finished step's status can carry its files inline (Hunyuan3D-2.1: 72 MB after the texture step), so status polls
+# read only this much; the step's status comes first, and its files are listed by /artifacts.
+STATUS_HEAD = 256 * 1024
+MODEL_FILE = (".glb", ".gltf", ".obj", ".ply", ".stl", ".fbx")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -119,6 +134,19 @@ def compact_zip(path: Path) -> Path:
         return path
     path.unlink(missing_ok=True)
     return out
+
+
+def _status_head(text: str) -> dict:
+    """A 3D task's status and progress from the head of an answer too big to read whole. Both come before the
+    step's result, which holds the big inline files. {} when they aren't there."""
+    i = text.find('"data"')
+    if i < 0:
+        return {}
+    j = text.find('"result"', i)
+    head = text[i:j] if j > i else text[i:]
+    st = re.search(r'"status"\s*:\s*"(\w+)"', head)
+    pct = re.search(r'"progress"\s*:\s*(\d+(?:\.\d+)?)', head)
+    return {"status": st.group(1), "progress": float(pct.group(1)) if pct else 0} if st else {}
 
 
 def _title_from(text: str, fallback: str) -> str:
@@ -482,7 +510,8 @@ class Studio:
     def _3d_post(self, info, job, stage, params, files):
         for attempt in range(3):
             try:
-                data = device.post_multipart(info, "core", "/v1/3d/tasks", {"stage": stage, "params": json.dumps(params)}, files, timeout=1800)
+                data = device.post_multipart(info, "core", _for_model("/v1/3d/tasks", job.meta.get("model")),
+                                             {"stage": stage, "params": json.dumps(params)}, files, timeout=1800)
                 return (data or {}).get("data", data) or {}
             except DeviceError as e:
                 if "429" in str(e) or re.search(r"another .*running|busy", str(e), re.I):
@@ -499,7 +528,10 @@ class Studio:
         if not tid:
             raise BadRequest("Nothing to pause right now; try again in a moment.")
         info = self.devconn.resolve()
-        device.call_ok(info, "core", "POST", f"/v1/3d/tasks/{_q(tid)}/{action}", timeout=30)
+        try:
+            device.call_ok(info, "core", "POST", _for_model(f"/v1/3d/tasks/{_q(tid)}/{action}", job.meta.get("model")), timeout=30)
+        except DeviceError as e:  # seen once on TiinyOS 0.1.39: "image-to-3d upstream closed the connection"
+            raise BadRequest(f"Your Tiiny didn't {action} the step ({e}). Try again in a moment.")
         job.meta["paused"] = action == "pause"
         job.update(log=f"{action} requested")
 
@@ -508,7 +540,11 @@ class Studio:
         model = spec["model"]
         npu.ensure_ready(model, policy="fits", job=job, info=info)
         opts = spec.get("options") if isinstance(spec.get("options"), dict) else {}
-        caps = (device.call_ok(info, "core", "GET", "/v1/3d/capabilities", timeout=30) or {})
+        seed = opts.get("seed")
+        if seed in (None, ""):  # the page's Seed box says random, but a model's own default can be fixed (Hunyuan3D-2.1: 1234)
+            seed = random.randint(1, 2 ** 31 - 1)
+        seed_used = None
+        caps = (device.call_ok(info, "core", "GET", _for_model("/v1/3d/capabilities", model), timeout=30) or {})
         caps = caps.get("data", caps) or {}
         stages_avail = caps.get("stages") or ["background", "shape", "simplify", "texture", "export"]
         specs = caps.get("stage_specs") or {}
@@ -520,7 +556,8 @@ class Studio:
         if not opts.get("texture", True):
             plan = [s for s in plan if s not in ("texture", "export")]
         work = self._workdir()
-        pool = {"image": (str(img_path), img_name)}   # artifact type -> (path, filename)
+        pool = {"image": (str(img_path), img_name)}   # artifact type -> (path, filename); "_mesh": the newest mesh
+        made = []   # every file the steps returned, for the log and errors
         notes = []
         if cutout:
             pool["image_no_bg"] = (str(cutout), "input-no-background.png")
@@ -532,9 +569,12 @@ class Studio:
                 job.check()
                 sp = specs.get(stage) or {}
                 allowed = set((sp.get("params") or {}).keys()) | set(sp.get("controls") or []) | set((caps.get("params") or {}).get(stage) or [])
-                wanted = {"seed": opts.get("seed"), "output_precision": opts.get("precision"), "inference_quality": opts.get("quality"),
+                if not specs:  # the model doesn't describe its steps: its list holds only its own extras
+                    allowed |= COMMON_3D_PARAMS.get(stage, set())
+                wanted = {"seed": seed, "output_precision": opts.get("precision"), "inference_quality": opts.get("quality"),
                           "asset_quality": opts.get("quality"), "target_faces": opts.get("target_faces"), "texture_size": opts.get("texture_size")}
                 params = {k: v for k, v in wanted.items() if v not in (None, "") and (k in allowed or not allowed)}
+                seed_used = params.get("seed", seed_used)
                 files, missing = [], []
                 for inp in (sp.get("required_inputs") or self._default_inputs(stage)) + [x for x in sp.get("optional_inputs") or [] if x != "mesh_glb"]:
                     src = self._pick_input(stage, inp, pool)
@@ -543,7 +583,8 @@ class Studio:
                     elif inp in (sp.get("required_inputs") or self._default_inputs(stage)):
                         missing.append(inp)
                 if missing:
-                    raise DeviceError(f"The {stage} step needs {', '.join(missing)}, which an earlier step didn't produce.")
+                    raise DeviceError(f"The {stage} step needs {', '.join(missing)}, which an earlier step didn't produce."
+                                      + (f" Your Tiiny returned: {', '.join(made)}." if made else ""))
                 required = {FORM_FIELD.get(x, x) for x in sp.get("required_inputs") or self._default_inputs(stage)}
                 while sum(Path(f[1]).stat().st_size for f in files) > DEVICE_UPLOAD_LIMIT - (1 << 20):
                     optional = [f for f in files if f[0] not in required]
@@ -559,34 +600,38 @@ class Studio:
                            progress=base, log=f"{stage}: {params}")
                 try:
                     task = run_abortable(job, self._3d_post, info, job, stage, params, files)
-                    result = self._3d_poll(info, job, task.get("task_id"), stage, base, 1 / len(plan))
+                    arts = self._3d_poll(info, job, task.get("task_id"), stage, base, 1 / len(plan), model)
                 except DeviceError as e:
                     if stage == "background":
                         notes.append(f"Background removal isn't working on the device ({e}); the original image was used.")
                         job.update(log=f"background skipped: {e}")
                         continue
                     raise
-                arts = ((result.get("result") or {}).get("output") or {}).get("artifacts") or []
+                made.extend(str(a.get("filename") or a.get("artifact_type") or "?") for a in arts)
+                job.update(log=f"  {stage} returned: " + (", ".join(f"{a.get('artifact_type')} {a.get('filename')}" for a in arts) or "nothing"))
                 for a in arts:
                     atype, fname = a.get("artifact_type") or "", a.get("filename") or "artifact"
                     preview = atype.endswith("_preview")
+                    model_file = fname.lower().endswith(MODEL_FILE) or (a.get("mime_type") or "").startswith("model/")
                     if stage == "export":
                         needed = True
                     elif stage == plan[-1]:
-                        needed = preview      # no texture step: the untextured preview is the result
+                        needed = model_file   # no texture step: this step's model is the result (TRELLIS.2's is its preview)
                     else:
                         needed = not preview  # intermediate files the next steps need
                     if not needed:
                         continue
                     dest = work / safe_name(f"{stage}-{fname}")
                     job.update(message=f"{label}: downloading {fname}…")
-                    st, _, size, err = device.download(info, "core", "GET", f"/v1/3d/tasks/{_q(task['task_id'])}/artifacts/{_q(a['artifact_id'])}",
+                    st, _, size, err = device.download(info, "core", "GET", _for_model(f"/v1/3d/tasks/{_q(task['task_id'])}/artifacts/{_q(a['artifact_id'])}", model),
                                                        dest, timeout=1800, job=job)
                     if err:
                         raise DeviceError(f"Couldn't download {fname}: {err}")
                     if dest.suffix.lower() == ".zip":
                         dest = compact_zip(dest)
                     pool[atype] = (str(dest), fname)
+                    if model_file and not preview:  # Hunyuan3D-2.1 calls every mesh "mesh_glb": shape, simplified, painted
+                        pool["_mesh"] = (str(dest), fname)
                     if (a.get("mime_type") or "").startswith("image/") and stage == "background":
                         pool["image_no_bg"] = (str(dest), fname)
                     job.update(log=f"  {stage}: {atype} {fname} {size / 1e6:.1f} MB")
@@ -600,7 +645,7 @@ class Studio:
             rec = self.gallery.add_files("model3d", files, {
                 "title": title, "prompt": "", "model": model, "source": "studio",
                 "parent_id": spec.get("image_gallery_id"),
-                "params": {"options": opts, "stages": plan, "seconds_taken": secs, "notes": notes}})
+                "params": {"options": opts, "stages": plan, "seconds_taken": secs, "notes": notes, "seed": seed_used}})
             job.update(message=f"Done in {secs // 60} min {secs % 60} s", progress=1, log=f"saved {rec['id']}")
             return {"gallery_id": rec["id"], "seconds": secs, "notes": notes}
         finally:
@@ -616,8 +661,8 @@ class Studio:
             return pool.get("image") if stage == "background" else (pool.get("image_no_bg") or pool.get("image"))
         if inp.endswith("_artifact"):
             return pool.get(inp[: -len("_artifact")])
-        if inp == "mesh":  # Hunyuan3D naming: the simplified mesh if there is one
-            return pool.get("simplified") or pool.get("geometry") or pool.get("shape")
+        if inp in ("mesh", "mesh_glb"):  # the newest mesh an earlier step made: the simplified one if that step ran
+            return pool.get("_mesh") or pool.get(inp)
         return pool.get(inp)
 
     @staticmethod
@@ -629,33 +674,45 @@ class Studio:
                     return v
         return glbs[-1][1] if glbs else None
 
-    def _3d_poll(self, info, job, tid, stage, base, span):
+    def _3d_poll(self, info, job, tid, stage, base, span, model="") -> list:
+        """Wait for a 3D step on the device to finish. Returns the files (artifacts) it made."""
         if not tid:
             raise DeviceError("The device didn't start the task")
         job.meta["task_id"] = tid
         label = STAGE_LABEL.get(stage, stage)
-        last = None
+        last, unreadable = None, 0
         try:
             while True:
                 try:
                     job.check()
                 except Cancelled:
                     try:
-                        device.call(info, "core", "POST", f"/v1/3d/tasks/{_q(tid)}/cancel", timeout=20)
+                        device.call(info, "core", "POST", _for_model(f"/v1/3d/tasks/{_q(tid)}/cancel", model), timeout=20)
                     except DeviceError:
                         pass
                     raise
                 time.sleep(3)
-                status, data, text = device.call(info, "core", "GET", f"/v1/3d/tasks/{_q(tid)}", timeout=30)
+                status, data, text = device.call(info, "core", "GET", _for_model(f"/v1/3d/tasks/{_q(tid)}", model), timeout=60, max_bytes=STATUS_HEAD)
                 if status == 404:
                     raise DeviceError("The device lost the task (was it restarted?)")
                 if not 200 <= status < 300:
                     continue
-                d = (data or {}).get("data", data) or {}
+                d = data.get("data", data) if isinstance(data, dict) else _status_head(text)
+                d = d if isinstance(d, dict) else {}
                 st = d.get("status")
+                if not st:
+                    unreadable += 1
+                    if unreadable >= 20:  # a minute of answers without a status: say so instead of waiting forever
+                        raise DeviceError(f"Couldn't read the device's answers about the {stage} step.")
+                    continue
+                unreadable = 0
                 pct = d.get("progress") if isinstance(d.get("progress"), (int, float)) else 0
                 if st == "completed":
-                    return d
+                    arts = ((d.get("result") or {}).get("output") or {}).get("artifacts")
+                    if not isinstance(arts, list):  # only the head of a big answer was read: ask for the list
+                        listed = device.call_ok(info, "core", "GET", _for_model(f"/v1/3d/tasks/{_q(tid)}/artifacts", model), timeout=60) or {}
+                        arts = (listed.get("data", listed) or {}).get("artifacts") if isinstance(listed, dict) else None
+                    return [a for a in arts or [] if isinstance(a, dict) and a.get("artifact_id")]
                 if st in ("error", "cancelled"):
                     raise DeviceError(str(d.get("error") or d.get("message") or st))
                 detail = str(d.get("runtime_stage") or d.get("message") or st or "").replace("_", " ")

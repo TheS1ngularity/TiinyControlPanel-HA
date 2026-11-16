@@ -62,7 +62,7 @@ remote access work.
 | Option | Default | What it does |
 |---|---|---|
 | Trust the Home Assistant login | on | See above. |
-| Gateway: accept any numeric address | on | Lets apps on other machines use the panel's gateway at `http://<HA address>:8766`. |
+| Gateway: accept any numeric address | on | No longer used. Since panel 1.4.3 the gateway always answers apps on other machines at `http://<HA address>:8766` once "Apps on other computers" is on in the panel. |
 | Tiiny address | empty | Your Tiiny's address. When filled in you don't have to enter it in the panel. |
 | Unlock the Tiiny automatically | off | After the Tiiny restarts, unlocks it with the key saved at your last log in. See below. |
 | Tiiny password | empty | Optional. Lets automatic unlock log in by itself when no key is saved yet or the saved key is refused. See below. |

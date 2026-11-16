@@ -1,6 +1,6 @@
 name: New panel release
 
-# Once a day: is there a newer release of the upstream Tiiny Control Panel than the copy in tiiny_panel/panel/?
+# Once a week (Monday 05:17 UTC): is there a newer release of the upstream Tiiny Control Panel than the copy in tiiny_panel/panel/?
 # If so, copy it in, test the Home Assistant edits against it, and open a pull request. Nothing is published
 # until a person merges that pull request. If the edits no longer fit, the pull request is opened as a draft
 # with the test output, so someone can adjust tiiny_panel/ha/patch_for_ha.py.
@@ -8,7 +8,7 @@ name: New panel release
 # Needs: Settings → Actions → General → Workflow permissions → "Allow GitHub Actions to create and approve pull requests".
 on:
   schedule:
-    - cron: "17 5 * * *"
+    - cron: "17 5 * * 1"
   workflow_dispatch:
 
 permissions:
